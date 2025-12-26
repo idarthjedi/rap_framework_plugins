@@ -1,6 +1,6 @@
 {
   "watch": {
-    "base_folder": "~/Documents/DEVONthink-Import",
+    "base_folder": "~/Documents/RAPPlatform-Import",
     "file_patterns": ["*.pdf"],
     "ignore_patterns": ["*.download", "*.crdownload", "*.tmp"],
     "stability_check_seconds": 1.0,

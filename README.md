@@ -7,7 +7,7 @@ A Python-based file watcher with configurable pipeline for automatically importi
 Drop PDF files into a watched folder structure that mirrors your DEVONthink databases:
 
 ```
-~/Documents/DEVONthink-Import/
+~/Documents/RAPPlatform-Import/
 ├── Liberty.University/           → Database: "Liberty.University"
 │   ├── Inbox/                    → database's incoming group
 │   │   └── lecture.pdf
@@ -54,7 +54,7 @@ uv sync
 ### 3. Create the Watch Folder
 
 ```bash
-mkdir -p ~/Documents/DEVONthink-Import/
+mkdir -p ~/Documents/RAPPlatform-Import/
 ```
 
 ### 4. Create Database Subfolders
@@ -63,7 +63,7 @@ Create a subfolder for each DEVONthink database you want to use:
 
 ```bash
 # Example for a database named "Liberty.University"
-mkdir -p ~/Documents/DEVONthink-Import/Liberty.University/Inbox
+mkdir -p ~/Documents/RAPPlatform-Import/Liberty.University/Inbox
 ```
 
 ### 5. Configure (Optional)
@@ -119,7 +119,7 @@ Configuration is stored in `config/config.json`:
 ```json
 {
   "watch": {
-    "base_folder": "~/Documents/DEVONthink-Import",
+    "base_folder": "~/Documents/RAPPlatform-Import",
     "file_patterns": ["*.pdf"],
     "ignore_patterns": ["*.download", "*.crdownload", "*.tmp"],
     "stability_check_seconds": 1.0,
@@ -157,7 +157,7 @@ Configuration is stored in `config/config.json`:
 
 | Section | Option | Default | Description |
 |---------|--------|---------|-------------|
-| watch | base_folder | ~/Documents/DEVONthink-Import | Folder to watch |
+| watch | base_folder | ~/Documents/RAPPlatform-Import | Folder to watch |
 | watch | file_patterns | ["*.pdf"] | File patterns to process |
 | watch | ignore_patterns | ["*.download", ...] | Patterns to ignore |
 | watch | stability_check_seconds | 1.0 | Delay between size checks |
