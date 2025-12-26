@@ -26,9 +26,9 @@ class TestParseArgs:
         assert args.mode == ExecutionMode.RUNONCE
 
     def test_default_config_path(self) -> None:
-        """Default config path should be config.json."""
+        """Default config path should be config/config.json."""
         args = parse_args([])
-        assert args.config_path == Path("config.json")
+        assert args.config_path == Path("config/config.json")
 
     def test_custom_config_path(self) -> None:
         """--config should set custom config path."""

@@ -66,10 +66,10 @@ Examples:
         "--config",
         "-c",
         type=Path,
-        default=Path("config.json"),
+        default=Path("config/config.json"),
         dest="config_path",
         metavar="FILE",
-        help="Path to config file (default: config.json)",
+        help="Path to config file (default: config/config.json)",
     )
 
     # Logging

@@ -152,19 +152,23 @@ class TestFindConfigFile:
     """Tests for finding config file."""
 
     def test_finds_config_in_current_dir(self, tmp_path: Path) -> None:
-        """Should find config.json in the given directory."""
-        config_path = tmp_path / "config.json"
+        """Should find config/config.json in the given directory."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        config_path = config_dir / "config.json"
         config_path.write_text('{}')
 
         found = find_config_file(tmp_path)
         assert found == config_path
 
     def test_finds_config_in_parent_dir(self, tmp_path: Path) -> None:
-        """Should find config.json in parent directory."""
+        """Should find config/config.json in parent directory."""
         subdir = tmp_path / "subdir"
         subdir.mkdir()
 
-        config_path = tmp_path / "config.json"
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        config_path = config_dir / "config.json"
         config_path.write_text('{}')
 
         found = find_config_file(subdir)

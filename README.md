@@ -68,7 +68,7 @@ mkdir -p ~/Documents/DEVONthink-Import/Liberty.University/Inbox
 
 ### 5. Configure (Optional)
 
-Edit `config.json` to customize settings. See [Configuration](#configuration) below.
+Edit `config/config.json` to customize settings. See [Configuration](#configuration) below.
 
 ## Usage
 
@@ -107,14 +107,14 @@ Options:
   -h, --help            Show help message
   --background          Run continuously with menu bar icon (default)
   --runonce             Process existing files and exit
-  --config, -c FILE     Path to config file (default: config.json)
+  --config, -c FILE     Path to config file (default: config/config.json)
   --log-level, -l LEVEL Override log level (TRACE, DEBUG, INFO, WARNING, ERROR)
   --version, -v         Show version
 ```
 
 ## Configuration
 
-Configuration is stored in `config.json`:
+Configuration is stored in `config/config.json`:
 
 ```json
 {
@@ -218,7 +218,7 @@ tail -f ~/Library/Logs/rap-importer.log
 | "Database not found" | Database name doesn't match folder name | Ensure folder name exactly matches DEVONthink database name |
 | "No incoming group configured" | Database has no inbox | Configure incoming group in DEVONthink's database settings |
 | "Script not found" | AppleScript file missing | Ensure scripts/devonthink_importer.scpt exists |
-| "Config file not found" | No config.json | Create config.json or specify path with --config |
+| "Config file not found" | No config/config.json | Create config/config.json or specify path with --config |
 
 ### Files Not Being Processed
 
@@ -240,7 +240,8 @@ uv run python -m pytest tests/ -v
 
 ```
 rap_importer/
-├── config.json                 # Configuration file
+├── config/
+│   └── config.json             # Configuration file
 ├── main.py                     # Entry point
 ├── src/rap_importer/          # Python package
 │   ├── cli.py                 # Command-line parsing

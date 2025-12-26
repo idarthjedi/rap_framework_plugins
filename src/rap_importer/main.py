@@ -36,7 +36,7 @@ def main() -> int:
         config = load_config(config_path)
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
-        print("Create a config.json file or specify path with --config", file=sys.stderr)
+        print("Create a config/config.json file or specify path with --config", file=sys.stderr)
         return 1
     except Exception as e:
         print(f"Error loading config: {e}", file=sys.stderr)
@@ -51,7 +51,11 @@ def main() -> int:
     setup_notifications(config.notifications)
 
     # Get project root for script resolution
-    project_root = config_path.parent
+    # If config is in a "config" subdirectory, go up one more level
+    if config_path.parent.name == "config":
+        project_root = config_path.parent.parent
+    else:
+        project_root = config_path.parent
 
     # Create components
     executor = ScriptExecutor(project_root)

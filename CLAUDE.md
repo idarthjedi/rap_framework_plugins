@@ -75,7 +75,8 @@ osacompile -o scripts/devonthink_importer.scpt scripts/devonthink_importer.apple
 
 ```
 rap_importer/
-├── config.json                 # Runtime configuration
+├── config/
+│   └── config.json             # Runtime configuration
 ├── main.py                     # CLI entry point
 ├── src/rap_importer/          # Python package
 │   ├── cli.py                 # Argument parsing
@@ -90,12 +91,13 @@ rap_importer/
 ├── scripts/
 │   ├── devonthink_importer.applescript  # Source
 │   └── devonthink_importer.scpt         # Compiled
+├── docs/                       # Historical plan documents (atomic, read-only)
 └── tests/                      # Test suite
 ```
 
 ### Adding Pipeline Scripts
 
-Add to `config.json`:
+Add to `config/config.json`:
 
 ```json
 {
@@ -165,12 +167,6 @@ Called via: `osascript devonthink_importer.scpt "/full/path" "Database/Group/fil
 | rumps | macOS menu bar apps |
 | DEVONthink Pro | Document management (bundle ID: `DNtp`) |
 
-## Legacy Files
-
-The following files are from the original AppleScript-only implementation:
-- `devonthink_importer.applescript` (root) - Original stay-open app (superseded by Python)
-- `rapt_import_script.applescript` - Simple Folder Action (for reference)
-
 ## Documentation Conventions
 
 ### Approved Plans
@@ -191,3 +187,5 @@ Where:
 - `docs/002_custom_ocr_settings.md`
 
 To determine the next number, check existing files in `docs/` and increment from the highest.
+
+**Important:** Plans in `docs/` are **atomic point-in-time references**. Once created, they should NOT be updated. When a plan is complete, mark it as "Implemented" in the plan's status field. These documents serve as historical records for look-back purposes.

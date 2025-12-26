@@ -191,30 +191,30 @@ def load_config(config_path: str | Path) -> Config:
 
 
 def find_config_file(start_path: Path | None = None) -> Path:
-    """Find config.json in current directory or parent directories.
+    """Find config/config.json in current directory or parent directories.
 
     Args:
         start_path: Starting directory (defaults to current working directory)
 
     Returns:
-        Path to config.json
+        Path to config/config.json
 
     Raises:
-        FileNotFoundError: If no config.json found
+        FileNotFoundError: If no config/config.json found
     """
     if start_path is None:
         start_path = Path.cwd()
 
     current = start_path
     while current != current.parent:
-        config_path = current / "config.json"
+        config_path = current / "config" / "config.json"
         if config_path.exists():
             return config_path
         current = current.parent
 
     # Check root too
-    config_path = current / "config.json"
+    config_path = current / "config" / "config.json"
     if config_path.exists():
         return config_path
 
-    raise FileNotFoundError("No config.json found in current directory or parents")
+    raise FileNotFoundError("No config/config.json found in current directory or parents")
