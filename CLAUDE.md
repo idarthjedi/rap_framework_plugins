@@ -4,126 +4,190 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AppleScript tools for automatically importing PDF files into DEVONthink with OCR. Two scripts are available:
-
-1. **Hierarchical Folder Importer** (`devonthink_importer.applescript`) - Stay-open app that monitors a folder tree and routes PDFs to databases/groups based on path
-2. **Simple Folder Action** (`rapt_import_script.applescript`) - Traditional Folder Action for single-folder monitoring
+RAP Importer is a Python-based file watcher with a configurable pipeline for automatically importing PDFs into DEVONthink with OCR. Files are routed to the correct database and group based on their folder structure.
 
 ## Architecture
 
-### Hierarchical Folder Importer (Primary)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Python File Watcher                          │
+│                                                                   │
+│  ┌─────────────┐    ┌──────────────┐    ┌───────────────────┐   │
+│  │  Watchdog   │───►│   Pipeline   │───►│  Script Executor  │   │
+│  │  Observer   │    │   Manager    │    │                   │   │
+│  └─────────────┘    └──────────────┘    └───────────────────┘   │
+│        │                   │                     │               │
+│        ▼                   ▼                     ▼               │
+│  ┌─────────────┐    ┌──────────────┐    ┌───────────────────┐   │
+│  │ File Events │    │ config.json  │    │ AppleScript/      │   │
+│  │ (*.pdf etc) │    │              │    │ Python scripts    │   │
+│  └─────────────┘    └──────────────┘    └───────────────────┘   │
+│                                                   │               │
+│                                                   ▼               │
+│                                          ┌───────────────────┐   │
+│                                          │ devonthink_       │   │
+│                                          │ importer.scpt     │   │
+│                                          │ (OCR only)        │   │
+│                                          └───────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-**devonthink_importer.applescript** - Stay-open application that:
-1. Polls `~/Documents/DEVONthink-Import/` recursively every 5 seconds
-2. Maps folder structure to DEVONthink databases and groups:
-   - `DatabaseName/` → database "DatabaseName" (must exist)
-   - `DatabaseName/Inbox/` → database's incoming group
-   - `DatabaseName/GroupA/GroupB/` → creates nested groups as needed
-3. Filters for completed PDFs (ignores partial downloads)
-4. Waits for file size to stabilize
-5. OCRs and imports to correct destination
-6. Triggers smart rules, then deletes original
+### Key Components
 
-**Key handlers:**
-- `on idle` - Main polling loop (returns `pollIntervalSeconds`)
-- `scanFolderRecursively()` - Uses shell `find` for efficiency
-- `parsePathComponents(filePath)` - Extracts database name, group path, isInbox flag
-- `getDatabaseByName(dbName)` - Gets database reference (errors if not found)
-- `getOrCreateDestinationGroup(...)` - Routes to incoming group or creates groups via `create location`
+| Module | Purpose |
+|--------|---------|
+| `cli.py` | Command-line argument parsing (argparse) |
+| `config.py` | Config schema (dataclasses) + loader |
+| `watcher.py` | File watching with stability checks (watchdog) |
+| `executor.py` | Script execution (osascript, subprocess) |
+| `pipeline.py` | Pipeline orchestration with retry logic |
+| `menubar.py` | macOS menu bar app (rumps) |
+| `notifications.py` | macOS notifications (osascript) |
+| `logging_config.py` | Logging with TRACE level, rotation |
 
-### Simple Folder Action (Legacy)
+### Execution Modes
 
-**rapt_import_script.applescript** - Folder Action with this workflow:
-1. Triggered when files are added to the attached folder
-2. Filters for completed PDF files (ignores `.download` and `.crdownload` partial downloads)
-3. Waits for file size to stabilize (ensures download is complete)
-4. Uses DEVONthink (`application id "DNtp"`) to OCR the PDF into the incoming group
-5. Triggers smart rules on the imported record
-6. Deletes the original file from the source folder
+- `--background` (default): Continuous watching with macOS menu bar icon
+- `--runonce`: Process existing files and exit
 
 ## Development
 
-**Compiling and Validation:**
-```bash
-# Compile .applescript to .scpt (validates syntax)
-osacompile -o devonthink_importer.scpt devonthink_importer.applescript
+### Commands
 
-# Decompile .scpt back to readable text
-osadecompile devonthink_importer.scpt
+```bash
+# Install dependencies
+uv sync
+
+# Run the app
+uv run rap-importer
+
+# Run with debug logging
+uv run rap-importer --log-level DEBUG
+
+# Run tests
+uv run python -m pytest tests/ -v
+
+# Compile AppleScript after changes
+osacompile -o scripts/devonthink_importer.scpt scripts/devonthink_importer.applescript
 ```
 
-If `osacompile` succeeds with no output, the script syntax is valid.
+### Project Structure
 
-**Creating the Stay-Open Application:**
-1. Open `devonthink_importer.applescript` in Script Editor.app
-2. File > Export > File Format: Application
-3. Check "Stay open after run handler"
-4. Save as `DEVONthink-Importer.app`
+```
+rap_importer/
+├── config.json                 # Runtime configuration
+├── main.py                     # CLI entry point
+├── src/rap_importer/          # Python package
+│   ├── cli.py                 # Argument parsing
+│   ├── config.py              # Config schema + loader
+│   ├── executor.py            # Script execution
+│   ├── logging_config.py      # Logging setup
+│   ├── main.py                # Main app logic
+│   ├── menubar.py             # macOS menu bar
+│   ├── notifications.py       # macOS notifications
+│   ├── pipeline.py            # Pipeline management
+│   └── watcher.py             # File watching
+├── scripts/
+│   ├── devonthink_importer.applescript  # Source
+│   └── devonthink_importer.scpt         # Compiled
+└── tests/                      # Test suite
+```
 
-**Testing:**
-- Create base folder: `mkdir -p ~/Documents/DEVONthink-Import/YourDatabase/Inbox`
-- Launch the app
-- Drop a PDF into the folder structure
-- Check the log: `tail -f ~/Library/Logs/DEVONthink-Importer.log`
+### Adding Pipeline Scripts
 
-**Editing:**
-- Edit the `.applescript` (plain text) file for version control friendly diffs
-- Open `.scpt` files with Script Editor.app for GUI editing
+Add to `config.json`:
+
+```json
+{
+  "name": "My Script",
+  "type": "python",
+  "path": "scripts/my_script.py",
+  "enabled": true,
+  "args": ["--file", "{file_path}", "--db", "{database}"]
+}
+```
+
+Variable substitution in args:
+- `{file_path}` - Full POSIX path
+- `{relative_path}` - Path from watch folder
+- `{filename}` - Just filename
+- `{database}` - First path component
+- `{group_path}` - Path between database and filename
 
 ## DEVONthink AppleScript Reference
 
-DEVONthink exposes a rich scripting dictionary. View it with:
+View the scripting dictionary:
 ```bash
-sdef /Applications/DEVONthink.app | less
+sdef /Applications/DEVONthink\ 3.app | less
 ```
 
-**Key Properties (read-only):**
-- `incoming group` - Default destination for new notes; resolves to global inbox or current database's incoming group
-- `current group` - The selected group in the frontmost window
-- `inbox` - The global inbox database
+### Common Commands
 
-**OCR Command:**
-```applescript
-ocr file <path> to <destination>
-```
-- `file` - POSIX path or file URL of PDF/image
-- `to` - Destination group (defaults to `incoming group` if omitted)
-- Returns: The OCR'd record object
-
-**Smart Rules:**
-```applescript
-perform smart rule record <record> trigger <event>
-```
-Events include: `import event`, `OCR event`, `convert event`, `tagging event`, etc.
-
-**Creating Groups:**
-```applescript
-create location "GroupA/GroupB" in theDatabase
-```
-- Creates nested group hierarchy if it doesn't exist
-- Returns the group reference (existing or newly created)
-
-**Database Access:**
-```applescript
-set theDatabase to database "DatabaseName"
-set incomingGrp to incoming group of theDatabase
-```
-
-**Common Patterns:**
 ```applescript
 tell application id "DNtp"
-    -- Import with OCR to inbox
-    set theRecord to ocr file "~/Downloads/doc.pdf" to incoming group
+    -- Get database by name
+    set theDatabase to database "DatabaseName"
 
-    -- Check if record was created
-    if exists theRecord then
-        -- Trigger post-OCR smart rules
-        perform smart rule record theRecord trigger OCR event
-    end if
+    -- Get incoming group (inbox)
+    set inbox to incoming group of theDatabase
+
+    -- Create nested groups
+    set destGroup to create location "Group/SubGroup" in theDatabase
+
+    -- OCR and import
+    set theRecord to ocr file "/path/to/file.pdf" to destGroup
+
+    -- Trigger smart rules
+    perform smart rule record theRecord trigger OCR event
 end tell
 ```
 
+### Simplified AppleScript
+
+The `scripts/devonthink_importer.applescript` is a simplified, argument-driven script:
+
+```applescript
+on run argv
+    set filePath to item 1 of argv
+    set relativePath to item 2 of argv
+    -- Parse path, get database/group, OCR import, trigger rules
+    return "success"
+end run
+```
+
+Called via: `osascript devonthink_importer.scpt "/full/path" "Database/Group/file.pdf"`
+
 ## Key Dependencies
 
-- **DEVONthink Pro** (bundle ID: `DNtp`) - document management application
-- **macOS Folder Actions** - system automation feature
+| Package | Purpose |
+|---------|---------|
+| watchdog | File system event monitoring |
+| rumps | macOS menu bar apps |
+| DEVONthink Pro | Document management (bundle ID: `DNtp`) |
+
+## Legacy Files
+
+The following files are from the original AppleScript-only implementation:
+- `devonthink_importer.applescript` (root) - Original stay-open app (superseded by Python)
+- `rapt_import_script.applescript` - Simple Folder Action (for reference)
+
+## Documentation Conventions
+
+### Approved Plans
+
+When a plan is approved and ready for implementation, save it to the `docs/` folder using this naming convention:
+
+```
+docs/<NNN>_<plan_name>.md
+```
+
+Where:
+- `<NNN>` is a three-digit sequential number (000, 001, 002, ...)
+- `<plan_name>` is a snake_case description of the plan
+
+**Examples:**
+- `docs/000_python_file_watcher_pipeline.md`
+- `docs/001_multi_database_support.md`
+- `docs/002_custom_ocr_settings.md`
+
+To determine the next number, check existing files in `docs/` and increment from the highest.

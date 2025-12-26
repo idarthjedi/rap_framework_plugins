@@ -1,0 +1,34 @@
+{
+  "watch": {
+    "base_folder": "~/Documents/DEVONthink-Import",
+    "file_patterns": ["*.pdf"],
+    "ignore_patterns": ["*.download", "*.crdownload", "*.tmp"],
+    "stability_check_seconds": 1.0,
+    "stability_timeout_seconds": 60
+  },
+  "pipeline": {
+    "retry_count": 3,
+    "retry_delay_seconds": 5,
+    "delete_on_success": true,
+    "scripts": [
+      {
+        "name": "DEVONthink Import",
+        "type": "applescript",
+        "path": "scripts/devonthink_importer.scpt",
+        "enabled": true,
+        "args": ["{file_path}", "{relative_path}"]
+      }
+    ]
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "~/Library/Logs/rap-importer.log",
+    "max_bytes": 10485760,
+    "backup_count": 5
+  },
+  "notifications": {
+    "enabled": true,
+    "on_error": true,
+    "on_success": false
+  }
+}

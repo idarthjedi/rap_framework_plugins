@@ -1,0 +1,236 @@
+"""Pipeline execution management for RAP Importer."""
+
+from __future__ import annotations
+
+import os
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, Callable
+
+from .executor import FileVariables, ScriptExecutor
+from .logging_config import get_logger
+from .notifications import notify_error, notify_success
+
+if TYPE_CHECKING:
+    from .config import PipelineConfig, WatchConfig
+
+logger = get_logger("pipeline")
+
+
+class PipelineManager:
+    """Manages execution of script pipeline for each file."""
+
+    def __init__(
+        self,
+        pipeline_config: PipelineConfig,
+        watch_config: WatchConfig,
+        executor: ScriptExecutor,
+        on_success: Callable[[], None] | None = None,
+    ) -> None:
+        """Initialize the pipeline manager.
+
+        Args:
+            pipeline_config: Pipeline configuration
+            watch_config: Watch configuration (for base folder)
+            executor: Script executor instance
+            on_success: Optional callback when file is successfully processed
+        """
+        self.config = pipeline_config
+        self.watch_config = watch_config
+        self.executor = executor
+        self.on_success = on_success
+
+        # Track failed files and their retry counts
+        self._failed_files: dict[str, int] = {}
+        self._files_processed = 0
+
+    @property
+    def files_processed(self) -> int:
+        """Number of files successfully processed."""
+        return self._files_processed
+
+    def process_file(self, file_path: Path) -> bool:
+        """Run all scripts in pipeline for a file.
+
+        Args:
+            file_path: Path to the file to process
+
+        Returns:
+            True if all scripts succeeded, False otherwise
+        """
+        file_key = str(file_path)
+
+        # Check if we should skip this file
+        if self._should_skip_file(file_key):
+            logger.debug(f"Skipping file (max retries exceeded): {file_path}")
+            return False
+
+        # Check if file exists
+        if not file_path.exists():
+            logger.warning(f"File no longer exists: {file_path}")
+            return False
+
+        logger.info(f"Processing: {file_path.name}")
+
+        # Create variables for substitution
+        base_folder = self.watch_config.expanded_base_folder
+        variables = FileVariables.from_file(file_path, base_folder)
+
+        logger.debug(
+            f"Variables: database={variables.database}, "
+            f"group_path={variables.group_path}, filename={variables.filename}"
+        )
+
+        # Run enabled scripts in order
+        scripts = self.config.enabled_scripts
+        if not scripts:
+            logger.warning("No enabled scripts in pipeline")
+            return False
+
+        for i, script in enumerate(scripts, 1):
+            logger.debug(f"Running script {i}/{len(scripts)}: {script.name}")
+
+            result = self.executor.execute(script, variables)
+
+            if not result.success:
+                logger.error(
+                    f"Script '{script.name}' failed: {result.error}"
+                )
+
+                # Track failure for retry
+                self._record_failure(file_key)
+
+                # Notify user
+                notify_error(
+                    "Import Failed",
+                    f"{file_path.name}: {result.error or 'Unknown error'}",
+                )
+
+                return False
+
+            logger.debug(f"Script '{script.name}' completed: {result}")
+
+        # All scripts succeeded
+        logger.info(f"Pipeline complete for: {file_path.name}")
+
+        # Delete original file if configured
+        if self.config.delete_on_success:
+            self._delete_file(file_path)
+
+        # Clear any failure tracking
+        self._failed_files.pop(file_key, None)
+
+        # Update counter and notify
+        self._files_processed += 1
+
+        if self.on_success:
+            self.on_success()
+
+        notify_success(
+            "Import Complete",
+            f"{file_path.name} imported successfully",
+        )
+
+        return True
+
+    def _should_skip_file(self, file_key: str) -> bool:
+        """Check if file has exceeded retry count.
+
+        Args:
+            file_key: File path as string
+
+        Returns:
+            True if file should be skipped
+        """
+        failure_count = self._failed_files.get(file_key, 0)
+        return failure_count >= self.config.retry_count
+
+    def _record_failure(self, file_key: str) -> None:
+        """Record a failure for a file.
+
+        Args:
+            file_key: File path as string
+        """
+        current = self._failed_files.get(file_key, 0)
+        self._failed_files[file_key] = current + 1
+
+        remaining = self.config.retry_count - self._failed_files[file_key]
+        if remaining > 0:
+            logger.info(f"Will retry ({remaining} attempts remaining)")
+        else:
+            logger.warning(f"Max retries exceeded, file will be ignored: {file_key}")
+            notify_error(
+                "Import Failed Permanently",
+                f"Max retries exceeded for file. Check logs for details.",
+            )
+
+    def _delete_file(self, file_path: Path) -> None:
+        """Delete the original file after successful processing.
+
+        Args:
+            file_path: Path to the file
+        """
+        try:
+            # Move to trash using Finder (safer than rm)
+            import subprocess
+
+            subprocess.run(
+                [
+                    "osascript",
+                    "-e",
+                    f'tell application "Finder" to delete POSIX file "{file_path}"',
+                ],
+                capture_output=True,
+                check=True,
+            )
+            logger.debug(f"Moved to trash: {file_path}")
+        except subprocess.CalledProcessError as e:
+            # Fall back to os.remove
+            logger.debug(f"Finder delete failed, using os.remove: {e}")
+            try:
+                os.remove(file_path)
+                logger.debug(f"Deleted: {file_path}")
+            except OSError as e:
+                logger.warning(f"Failed to delete file: {e}")
+
+    def reset_failures(self) -> None:
+        """Clear failed files tracking (call on restart)."""
+        count = len(self._failed_files)
+        self._failed_files.clear()
+        if count > 0:
+            logger.info(f"Reset failure tracking for {count} files")
+
+    def get_failed_files(self) -> list[str]:
+        """Get list of files that have failed.
+
+        Returns:
+            List of file paths that have failed
+        """
+        return list(self._failed_files.keys())
+
+    def retry_failed_files(self) -> int:
+        """Attempt to retry all failed files.
+
+        Returns:
+            Number of files successfully processed on retry
+        """
+        failed = list(self._failed_files.keys())
+        if not failed:
+            return 0
+
+        logger.info(f"Retrying {len(failed)} failed files")
+        success_count = 0
+
+        for file_key in failed:
+            file_path = Path(file_key)
+            if file_path.exists():
+                # Reset failure count for this file
+                self._failed_files[file_key] = 0
+
+                # Wait before retry
+                time.sleep(self.config.retry_delay_seconds)
+
+                if self.process_file(file_path):
+                    success_count += 1
+
+        return success_count

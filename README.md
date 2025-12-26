@@ -1,6 +1,6 @@
-# DEVONthink Hierarchical Folder Importer
+# RAP Importer
 
-A stay-open AppleScript application that monitors a folder hierarchy and automatically imports PDFs into DEVONthink with OCR, routing them to the correct database and group based on the folder structure.
+A Python-based file watcher with configurable pipeline for automatically importing PDFs into DEVONthink with OCR. Files are routed to the correct database and group based on their folder structure.
 
 ## Overview
 
@@ -17,21 +17,47 @@ Drop PDF files into a watched folder structure that mirrors your DEVONthink data
 │   └── quick-note.pdf            → incoming group (root-level files)
 ```
 
+## Features
+
+- **Python-based file watching** using watchdog for reliable, event-driven monitoring
+- **Configurable pipeline** with support for AppleScript and Python scripts
+- **Two execution modes**:
+  - `--background` (default): Continuous watching with macOS menu bar icon
+  - `--runonce`: Process existing files and exit (great for cron jobs)
+- **Menu bar app**: Shows running status, file count, and easy quit access
+- **Retry logic**: Failed files are retried up to N times with configurable delays
+- **macOS notifications**: Get notified of errors (and optionally successes)
+- **Flexible logging**: DEBUG/TRACE levels with file rotation
+
 ## Prerequisites
 
 - **macOS** (tested on macOS Sonoma)
+- **Python 3.12+**
 - **DEVONthink Pro** installed
-- DEVONthink databases must already exist with matching names
+- **uv** package manager ([install](https://docs.astral.sh/uv/getting-started/installation/))
 
 ## Installation
 
-### 1. Create the Base Folder
+### 1. Clone the Repository
+
+```bash
+git clone <repo-url>
+cd rap_importer
+```
+
+### 2. Install Dependencies
+
+```bash
+uv sync
+```
+
+### 3. Create the Watch Folder
 
 ```bash
 mkdir -p ~/Documents/DEVONthink-Import/
 ```
 
-### 2. Create Database Subfolders
+### 4. Create Database Subfolders
 
 Create a subfolder for each DEVONthink database you want to use:
 
@@ -40,81 +66,119 @@ Create a subfolder for each DEVONthink database you want to use:
 mkdir -p ~/Documents/DEVONthink-Import/Liberty.University/Inbox
 ```
 
-### 3. Compile the Stay-Open Application
+### 5. Configure (Optional)
 
-**Option A: Using Script Editor (Recommended)**
+Edit `config.json` to customize settings. See [Configuration](#configuration) below.
 
-1. Open `devonthink_importer.applescript` in Script Editor.app
-2. Go to **File > Export...**
-3. Set **File Format** to **Application**
-4. Check **Stay open after run handler**
-5. Save as `DEVONthink-Importer.app`
+## Usage
 
-**Option B: Using Command Line**
+### Run in Background Mode (default)
 
 ```bash
-# Compile to .scpt first
-osacompile -o DEVONthink-Importer.scpt devonthink_importer.applescript
-
-# Then open in Script Editor and re-export as Application with "Stay open" checked
-open -a "Script Editor" DEVONthink-Importer.scpt
+uv run rap-importer
 ```
 
-> **Note:** The `osacompile` command cannot directly create stay-open applications. You must use Script Editor's Export dialog to enable the "Stay open after run handler" option.
+Or with the `--background` flag explicitly:
+
+```bash
+uv run rap-importer --background
+```
+
+This will:
+1. Process any existing files in the watch folder
+2. Start watching for new files
+3. Show a menu bar icon ("RAP") with status and quit option
+
+### Run Once Mode
+
+Process all existing files and exit:
+
+```bash
+uv run rap-importer --runonce
+```
+
+### Command-Line Options
+
+```
+rap-importer [-h] [--background | --runonce] [--config FILE]
+             [--log-level LEVEL] [--version]
+
+Options:
+  -h, --help            Show help message
+  --background          Run continuously with menu bar icon (default)
+  --runonce             Process existing files and exit
+  --config, -c FILE     Path to config file (default: config.json)
+  --log-level, -l LEVEL Override log level (TRACE, DEBUG, INFO, WARNING, ERROR)
+  --version, -v         Show version
+```
 
 ## Configuration
 
-### Changing the Base Folder
+Configuration is stored in `config.json`:
 
-Edit the `baseFolderPath` property at the top of `devonthink_importer.applescript`:
-
-```applescript
-property baseFolderPath : "~/Documents/DEVONthink-Import/"
+```json
+{
+  "watch": {
+    "base_folder": "~/Documents/DEVONthink-Import",
+    "file_patterns": ["*.pdf"],
+    "ignore_patterns": ["*.download", "*.crdownload", "*.tmp"],
+    "stability_check_seconds": 1.0,
+    "stability_timeout_seconds": 60
+  },
+  "pipeline": {
+    "retry_count": 3,
+    "retry_delay_seconds": 5,
+    "delete_on_success": true,
+    "scripts": [
+      {
+        "name": "DEVONthink Import",
+        "type": "applescript",
+        "path": "scripts/devonthink_importer.scpt",
+        "enabled": true,
+        "args": ["{file_path}", "{relative_path}"]
+      }
+    ]
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "~/Library/Logs/rap-importer.log",
+    "max_bytes": 10485760,
+    "backup_count": 5
+  },
+  "notifications": {
+    "enabled": true,
+    "on_error": true,
+    "on_success": false
+  }
+}
 ```
 
-### Adjusting Poll Interval
+### Configuration Options
 
-The default poll interval is 5 seconds. To change it:
+| Section | Option | Default | Description |
+|---------|--------|---------|-------------|
+| watch | base_folder | ~/Documents/DEVONthink-Import | Folder to watch |
+| watch | file_patterns | ["*.pdf"] | File patterns to process |
+| watch | ignore_patterns | ["*.download", ...] | Patterns to ignore |
+| watch | stability_check_seconds | 1.0 | Delay between size checks |
+| watch | stability_timeout_seconds | 60 | Max time to wait for stable file |
+| pipeline | retry_count | 3 | Max retries for failed files |
+| pipeline | retry_delay_seconds | 5 | Delay between retries |
+| pipeline | delete_on_success | true | Delete source file after success |
+| logging | level | INFO | Log level (TRACE/DEBUG/INFO/WARNING/ERROR) |
+| logging | file | ~/Library/Logs/rap-importer.log | Log file path |
+| notifications | enabled | true | Enable macOS notifications |
+| notifications | on_error | true | Notify on errors |
+| notifications | on_success | false | Notify on success |
 
-```applescript
-property pollIntervalSeconds : 5
-```
+### Script Variable Substitution
 
-### Other Settings
-
-```applescript
-property stabilityCheckDelay : 0.5      -- Seconds between file size checks
-property stabilityCheckMaxWait : 60     -- Max seconds to wait for download completion
-property maxFilesPerCycle : 10          -- Max files to process per poll cycle (prevents blocking)
-property maxProcessedListSize : 1000    -- Cleanup threshold for tracking list
-property logEnabled : true              -- Enable/disable logging
-```
-
-## Running the Application
-
-### Manual Launch
-
-Double-click `DEVONthink-Importer.app` or:
-
-```bash
-open DEVONthink-Importer.app
-```
-
-The application will stay running in the background, polling for new PDFs every 5 seconds.
-
-### Auto-Start on Login
-
-To have the importer start automatically when you log in:
-
-1. Open **System Settings**
-2. Go to **General > Login Items**
-3. Click **+** under "Open at Login"
-4. Select `DEVONthink-Importer.app`
-
-### Stopping the Application
-
-- Right-click the app icon in the Dock and choose **Quit**
-- Or use Activity Monitor to quit the process
+Scripts can use these variables in their args:
+- `{file_path}` - Full POSIX path to the file
+- `{relative_path}` - Path relative to watch folder
+- `{filename}` - Just the filename
+- `{database}` - First path component (database name)
+- `{group_path}` - Path between database and filename
 
 ## Folder Structure Reference
 
@@ -122,30 +186,29 @@ To have the importer start automatically when you log in:
 |--------------|------------------------|
 | `DatabaseName/file.pdf` | Database's incoming group |
 | `DatabaseName/Inbox/file.pdf` | Database's incoming group |
-| `DatabaseName/Inbox/SubGroup/file.pdf` | Subgroup within incoming group (created if needed) |
+| `DatabaseName/Inbox/SubGroup/file.pdf` | Subgroup within incoming group |
 | `DatabaseName/GroupA/file.pdf` | Group "GroupA" (created if needed) |
 | `DatabaseName/GroupA/GroupB/file.pdf` | Group "GroupA/GroupB" (created if needed) |
 
 ### Special Behaviors
 
-- **Database must exist**: If the database doesn't exist in DEVONthink, the file is skipped with an error logged
-- **Inbox must exist**: The database's incoming group must be configured
-- **Groups auto-created**: Non-Inbox groups are created automatically using DEVONthink's `create location` command
+- **Database must exist**: If the database doesn't exist in DEVONthink, the file fails with error
+- **Groups auto-created**: Non-Inbox groups are created automatically
 - **Smart rules triggered**: After OCR, smart rules with "OCR event" trigger are executed
-- **Original deleted**: Successfully imported files are moved to Trash
+- **Original deleted**: Successfully imported files are moved to Trash (configurable)
 
 ## Troubleshooting
 
 ### Log File Location
 
 ```bash
-cat ~/Library/Logs/DEVONthink-Importer.log
+cat ~/Library/Logs/rap-importer.log
 ```
 
-Or follow the log in real-time:
+Or follow in real-time:
 
 ```bash
-tail -f ~/Library/Logs/DEVONthink-Importer.log
+tail -f ~/Library/Logs/rap-importer.log
 ```
 
 ### Common Errors
@@ -154,26 +217,47 @@ tail -f ~/Library/Logs/DEVONthink-Importer.log
 |-------|-------|----------|
 | "Database not found" | Database name doesn't match folder name | Ensure folder name exactly matches DEVONthink database name |
 | "No incoming group configured" | Database has no inbox | Configure incoming group in DEVONthink's database settings |
-| "File stability timeout" | File took >60s to finish downloading | Increase `stabilityCheckMaxWait` or check download |
-| "Base folder not found" | Watch folder doesn't exist | Create `~/Documents/DEVONthink-Import/` |
+| "Script not found" | AppleScript file missing | Ensure scripts/devonthink_importer.scpt exists |
+| "Config file not found" | No config.json | Create config.json or specify path with --config |
 
 ### Files Not Being Processed
 
 1. Check the log file for errors
 2. Ensure DEVONthink is running
 3. Verify the file has a `.pdf` extension
-4. Make sure the file isn't still downloading (`.download` or `.crdownload` files are ignored)
+4. Make sure the file isn't still downloading (`.download` files are ignored)
+5. Run with `--log-level DEBUG` for more details
 
-### Application Not Staying Open
+## Development
 
-If the app quits immediately after launch:
-- Ensure you exported with **Stay open after run handler** checked
-- Check Console.app for crash logs
-- Verify DEVONthink is installed
+### Running Tests
 
-## Files in This Repository
+```bash
+uv run python -m pytest tests/ -v
+```
 
-- `devonthink_importer.applescript` - Main script source (plain text, version control friendly)
-- `rapt_import_script.applescript` - Original Folder Action script (for reference)
-- `CLAUDE.md` - Development documentation
-- `README.md` - This file
+### Project Structure
+
+```
+rap_importer/
+├── config.json                 # Configuration file
+├── main.py                     # Entry point
+├── src/rap_importer/          # Python package
+│   ├── cli.py                 # Command-line parsing
+│   ├── config.py              # Configuration loading
+│   ├── executor.py            # Script execution
+│   ├── logging_config.py      # Logging setup
+│   ├── main.py                # Main application logic
+│   ├── menubar.py             # macOS menu bar app
+│   ├── notifications.py       # macOS notifications
+│   ├── pipeline.py            # Pipeline management
+│   └── watcher.py             # File watching
+├── scripts/
+│   ├── devonthink_importer.applescript  # Source
+│   └── devonthink_importer.scpt         # Compiled
+└── tests/                      # Test suite
+```
+
+## License
+
+MIT License
