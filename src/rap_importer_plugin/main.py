@@ -283,27 +283,32 @@ def run_foreground(config: Config, watcher_instances: list[WatcherInstance]) -> 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
-    # Process existing files first (for each watcher)
-    for instance in watcher_instances:
-        existing = scan_existing_files(instance.config.watch)
-        if existing:
-            logger.info(f"[{instance.name}] Processing {len(existing)} existing files")
-            for file_path in existing:
-                instance.pipeline.process_file(file_path)
+    # Startup callback - called after menu bar is visible
+    def on_startup() -> None:
+        """Process existing files and start watchers after menu bar appears."""
+        # Process existing files first (for each watcher)
+        for instance in watcher_instances:
+            existing = scan_existing_files(instance.config.watch)
+            if existing:
+                logger.info(f"[{instance.name}] Processing {len(existing)} existing files")
+                for file_path in existing:
+                    instance.pipeline.process_file(file_path)
 
-    # Start all watchers
-    for instance in watcher_instances:
-        instance.watcher.start()
-        logger.info(f"[{instance.name}] Started watching: {instance.config.watch.base_folder}")
+        # Start all watchers
+        for instance in watcher_instances:
+            instance.watcher.start()
+            logger.info(f"[{instance.name}] Started watching: {instance.config.watch.base_folder}")
 
-    # Run menu bar app (blocks until quit)
+    # Quit callback
     def on_quit() -> None:
         logger.info("Shutting down from menu bar")
         for instance in watcher_instances:
             instance.watcher.stop()
 
+    # Run menu bar app (blocks until quit)
+    # on_startup is called after menu bar appears to process existing files
     log_path = config.logging.expanded_file
-    run_menubar(watcher_instances, log_path, on_quit)
+    run_menubar(watcher_instances, log_path, on_quit, on_startup)
 
     return 0
 

@@ -45,6 +45,7 @@ class FileVariables:
     filename: str  # Just the filename
     database: str  # First path component (database name)
     group_path: str  # Path between database and filename
+    base_folder: str = ""  # Base watch folder path
     log_level: str = "INFO"  # Current log level from config
 
     @classmethod
@@ -92,6 +93,7 @@ class FileVariables:
             filename=filename,
             database=database,
             group_path=group_path,
+            base_folder=str(base_folder),
             log_level=log_level,
         )
 
@@ -103,6 +105,7 @@ class FileVariables:
             "filename": self.filename,
             "database": self.database,
             "group_path": self.group_path,
+            "base_folder": self.base_folder,
             "log_level": self.log_level,
         }
 

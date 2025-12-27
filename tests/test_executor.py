@@ -52,7 +52,8 @@ class TestFileVariables:
             relative_path="DB/file.pdf",
             filename="file.pdf",
             database="DB",
-            group_path=""
+            group_path="",
+            base_folder="/path/to/watch"
         )
 
         d = vars.as_dict()
@@ -62,6 +63,7 @@ class TestFileVariables:
         assert d["filename"] == "file.pdf"
         assert d["database"] == "DB"
         assert d["group_path"] == ""
+        assert d["base_folder"] == "/path/to/watch"
         assert d["log_level"] == "INFO"  # Default value
 
     def test_log_level_from_file(self) -> None:
@@ -73,6 +75,16 @@ class TestFileVariables:
 
         assert vars.log_level == "DEBUG"
         assert vars.as_dict()["log_level"] == "DEBUG"
+
+    def test_base_folder_from_file(self) -> None:
+        """Should include base_folder in variables from from_file."""
+        base = Path("/home/user/imports")
+        file = Path("/home/user/imports/MyDatabase/document.pdf")
+
+        vars = FileVariables.from_file(file, base)
+
+        assert vars.base_folder == "/home/user/imports"
+        assert vars.as_dict()["base_folder"] == "/home/user/imports"
 
 
 class TestScriptExecutor:

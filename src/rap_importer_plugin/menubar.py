@@ -24,6 +24,7 @@ class RAPImporterMenuBar(rumps.App):
         watcher_instances: list[WatcherInstance],
         log_path: Path,
         on_quit: Callable[[], None],
+        on_startup: Callable[[], None] | None = None,
     ) -> None:
         """Initialize the menu bar app.
 
@@ -31,6 +32,7 @@ class RAPImporterMenuBar(rumps.App):
             watcher_instances: List of watcher/pipeline pairs
             log_path: Path to log file (for "Open Log" action)
             on_quit: Callback to run when quitting
+            on_startup: Callback to run after menu bar appears (for deferred init)
         """
         # Use a simple text icon (📄 could be used but text is more reliable)
         super().__init__("RAP", quit_button=None)
@@ -38,6 +40,8 @@ class RAPImporterMenuBar(rumps.App):
         self.watcher_instances = watcher_instances
         self.log_path = log_path
         self.on_quit = on_quit
+        self.on_startup = on_startup
+        self._startup_done = False
         self._last_count = 0
         self._last_counts: dict[str, int] = {}
 
@@ -84,6 +88,20 @@ class RAPImporterMenuBar(rumps.App):
         ])
 
         self.menu = menu_items
+
+    @rumps.timer(0.5)
+    def _startup_timer(self, sender: rumps.Timer) -> None:
+        """Run startup callback once after menu bar is visible."""
+        if self._startup_done:
+            sender.stop()
+            return
+
+        self._startup_done = True
+        sender.stop()
+
+        if self.on_startup:
+            logger.debug("Running deferred startup callback")
+            self.on_startup()
 
     @rumps.timer(2)
     def _update_counter(self, _sender: rumps.Timer) -> None:
@@ -145,6 +163,7 @@ def run_menubar(
     watcher_instances: list[WatcherInstance],
     log_path: Path,
     on_quit: Callable[[], None],
+    on_startup: Callable[[], None] | None = None,
 ) -> None:
     """Run the menu bar application.
 
@@ -154,7 +173,8 @@ def run_menubar(
         watcher_instances: List of watcher/pipeline pairs
         log_path: Path to log file
         on_quit: Callback to run when quitting
+        on_startup: Callback to run after menu bar appears (for deferred init)
     """
-    app = RAPImporterMenuBar(watcher_instances, log_path, on_quit)
+    app = RAPImporterMenuBar(watcher_instances, log_path, on_quit, on_startup)
     logger.info(f"Starting menu bar app with {len(watcher_instances)} watchers")
     app.run()
