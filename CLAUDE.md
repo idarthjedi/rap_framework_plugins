@@ -47,7 +47,8 @@ RAP Importer is a Python-based file watcher with a configurable pipeline for aut
 
 ### Execution Modes
 
-- `--background` (default): Continuous watching with macOS menu bar icon
+- `--background` (default): Spawn daemon in background, return to terminal
+- `--foreground`: Run in terminal with console output (for debugging)
 - `--runonce`: Process existing files and exit
 
 ## Development
@@ -74,11 +75,11 @@ osacompile -o scripts/devonthink_importer.scpt scripts/devonthink_importer.apple
 ### Project Structure
 
 ```
-rap_importer/
+rap_importer_plugin/
 ├── config/
 │   └── config.json             # Runtime configuration
 ├── main.py                     # CLI entry point
-├── src/rap_importer/          # Python package
+├── src/rap_importer_plugin/   # Python package
 │   ├── cli.py                 # Argument parsing
 │   ├── config.py              # Config schema + loader
 │   ├── executor.py            # Script execution

@@ -176,7 +176,7 @@ def spawn_daemon(args, config_path: Path) -> int:
     cmd = [
         sys.executable,
         "-m",
-        "rap_importer.main",
+        "rap_importer_plugin.main",
         "--foreground",
         "--config",
         str(config_path),

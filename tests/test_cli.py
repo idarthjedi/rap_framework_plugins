@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rap_importer.cli import CLIArgs, ExecutionMode, parse_args
+from rap_importer_plugin.cli import CLIArgs, ExecutionMode, parse_args
 
 
 class TestParseArgs:

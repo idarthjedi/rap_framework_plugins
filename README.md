@@ -1,4 +1,4 @@
-# RAP Importer
+# RAP Importer Plugin
 
 A Python-based file watcher with configurable pipeline for automatically importing PDFs into DEVONthink with OCR. Files are routed to the correct database and group based on their folder structure.
 
@@ -22,8 +22,9 @@ Drop PDF files into a watched folder structure that mirrors your DEVONthink data
 - **Python-based file watching** using watchdog for reliable, event-driven monitoring
 - **Configurable pipeline** with support for AppleScript and Python scripts
 - **Duplicate detection**: SHA-1 hash-based detection prevents importing the same file twice
-- **Two execution modes**:
-  - `--background` (default): Continuous watching with macOS menu bar icon
+- **Three execution modes**:
+  - `--background` (default): Spawn daemon, return to terminal
+  - `--foreground`: Run in terminal with console output (for debugging)
   - `--runonce`: Process existing files and exit (great for cron jobs)
 - **Menu bar app**: Shows running status, file count, and easy quit access
 - **Retry logic**: Failed files are retried up to N times with configurable delays
@@ -45,7 +46,7 @@ Drop PDF files into a watched folder structure that mirrors your DEVONthink data
 
 ```bash
 git clone <repo-url>
-cd rap_importer
+cd rap_importer_plugin
 ```
 
 ### 2. Install Dependencies
@@ -296,11 +297,11 @@ uv run python -m pytest tests/ -v
 ### Project Structure
 
 ```
-rap_importer/
+rap_importer_plugin/
 ├── config/
 │   └── config.json             # Configuration file
 ├── main.py                     # Entry point
-├── src/rap_importer/          # Python package
+├── src/rap_importer_plugin/   # Python package
 │   ├── cli.py                 # Command-line parsing
 │   ├── config.py              # Configuration loading
 │   ├── executor.py            # Script execution

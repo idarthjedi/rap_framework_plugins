@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rap_importer.executor import FileVariables, ScriptExecutor
-from rap_importer.config import ScriptConfig
+from rap_importer_plugin.executor import FileVariables, ScriptExecutor
+from rap_importer_plugin.config import ScriptConfig
 
 
 class TestFileVariables:

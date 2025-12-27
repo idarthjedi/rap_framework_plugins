@@ -181,7 +181,7 @@ wheels = [
 ]
 
 [[package]]
-name = "rap-importer"
+name = "rap-importer-plugin"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

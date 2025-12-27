@@ -6,7 +6,7 @@ import json
 import pytest
 from pathlib import Path
 
-from rap_importer.config import (
+from rap_importer_plugin.config import (
     Config,
     WatchConfig,
     PipelineConfig,

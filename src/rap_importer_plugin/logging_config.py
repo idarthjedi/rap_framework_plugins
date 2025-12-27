@@ -70,7 +70,7 @@ def setup_logging(
         level = getattr(logging, level_name.upper())
 
     # Get the package logger
-    logger = logging.getLogger("rap_importer")
+    logger = logging.getLogger("rap_importer_plugin")
     logger.setLevel(level)
     logger.handlers.clear()
 
@@ -116,6 +116,6 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         Logger instance
     """
-    if name.startswith("rap_importer."):
+    if name.startswith("rap_importer_plugin."):
         return logging.getLogger(name)
-    return logging.getLogger(f"rap_importer.{name}")
+    return logging.getLogger(f"rap_importer_plugin.{name}")
