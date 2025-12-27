@@ -17,7 +17,6 @@ from .cli import ExecutionMode, parse_args
 from .config import find_config_file, load_config
 from .executor import ScriptExecutor
 from .logging_config import get_logger, setup_logging
-from .menubar import run_menubar
 from .notifications import setup_notifications
 from .pipeline import PipelineManager
 from .watcher import FileWatcher, scan_existing_files
@@ -118,6 +117,7 @@ def main() -> int:
         pipeline_config=config.pipeline,
         watch_config=config.watch,
         executor=executor,
+        log_level=config.logging.level,
     )
 
     # Run in appropriate mode
@@ -215,6 +215,10 @@ def run_foreground(config, pipeline: PipelineManager) -> int:
     Returns:
         Exit code
     """
+    # Import menubar lazily to avoid importing rumps in runonce mode
+    # (rumps initializes macOS event loop infrastructure that prevents clean exit)
+    from .menubar import run_menubar
+
     logger.info("Running in foreground mode with menu bar")
 
     # Create watcher

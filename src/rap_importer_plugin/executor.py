@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shlex
 import subprocess
 import sys
 import time
@@ -43,14 +45,21 @@ class FileVariables:
     filename: str  # Just the filename
     database: str  # First path component (database name)
     group_path: str  # Path between database and filename
+    log_level: str = "INFO"  # Current log level from config
 
     @classmethod
-    def from_file(cls, file_path: Path, base_folder: Path) -> FileVariables:
+    def from_file(
+        cls,
+        file_path: Path,
+        base_folder: Path,
+        log_level: str = "INFO",
+    ) -> FileVariables:
         """Create variables from a file path.
 
         Args:
             file_path: Full path to the file
             base_folder: Base watch folder
+            log_level: Current log level from config
 
         Returns:
             FileVariables with all computed values
@@ -83,6 +92,7 @@ class FileVariables:
             filename=filename,
             database=database,
             group_path=group_path,
+            log_level=log_level,
         )
 
     def as_dict(self) -> dict[str, str]:
@@ -93,6 +103,7 @@ class FileVariables:
             "filename": self.filename,
             "database": self.database,
             "group_path": self.group_path,
+            "log_level": self.log_level,
         }
 
 
@@ -125,7 +136,19 @@ class ScriptExecutor:
         """
         logger.debug(f"Executing script: {script.name} ({script.type})")
 
-        # Resolve script path
+        # Substitute variables in args
+        substituted_args = self._substitute_args(script.args, variables)
+        var_dict = variables.as_dict()
+
+        # Handle command type separately (path is a command string, not a file)
+        if script.type == "command":
+            substituted_command = script.path.format(**var_dict)
+            substituted_cwd = script.cwd.format(**var_dict) if script.cwd else None
+            return self._execute_command(
+                substituted_command, substituted_args, substituted_cwd, timeout
+            )
+
+        # For applescript and python, resolve and validate script path
         script_path = self._resolve_path(script.path)
         if not script_path.exists():
             return ExecutionResult(
@@ -134,9 +157,6 @@ class ScriptExecutor:
                 error=f"Script not found: {script_path}",
                 duration_ms=0,
             )
-
-        # Substitute variables in args
-        substituted_args = self._substitute_args(script.args, variables)
 
         # Execute based on type
         if script.type == "applescript":
@@ -217,7 +237,7 @@ class ScriptExecutor:
 
         cmd = ["osascript", str(script_path)] + arg_list
 
-        logger.trace(f"Running: {' '.join(cmd)}")  # type: ignore[attr-defined]
+        logger.debug(f"Executing: {' '.join(cmd)}")
 
         return self._run_subprocess(cmd, timeout)
 
@@ -248,16 +268,89 @@ class ScriptExecutor:
 
         cmd = [sys.executable, str(script_path)] + arg_list
 
-        logger.trace(f"Running: {' '.join(cmd)}")  # type: ignore[attr-defined]
+        logger.debug(f"Executing: {' '.join(cmd)}")
 
         return self._run_subprocess(cmd, timeout)
 
-    def _run_subprocess(self, cmd: list[str], timeout: int) -> ExecutionResult:
+    def _execute_command(
+        self,
+        command_str: str,
+        args: dict[str, str] | list[str],
+        cwd: str | None,
+        timeout: int,
+    ) -> ExecutionResult:
+        """Execute a shell command.
+
+        Args:
+            command_str: The command string to execute (already variable-substituted)
+            args: Additional arguments to append
+            cwd: Working directory (optional, supports ~ expansion)
+            timeout: Maximum execution time
+
+        Returns:
+            ExecutionResult
+        """
+        # Parse command string into list (handles quotes, spaces correctly)
+        try:
+            cmd = shlex.split(command_str)
+        except ValueError as e:
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=f"Failed to parse command: {e}",
+                duration_ms=0,
+            )
+
+        # Append additional args
+        if isinstance(args, dict):
+            for key, value in args.items():
+                cmd.extend([f"--{key}", value])
+        else:
+            cmd.extend(args)
+
+        # Expand ~ in all command parts that look like paths
+        cmd = [os.path.expanduser(part) if part.startswith("~") else part for part in cmd]
+
+        # Resolve working directory
+        resolved_cwd: str | None = None
+        if cwd:
+            resolved_cwd = os.path.expanduser(cwd)
+            if not os.path.isdir(resolved_cwd):
+                return ExecutionResult(
+                    success=False,
+                    output="",
+                    error=f"Working directory does not exist: {resolved_cwd}",
+                    duration_ms=0,
+                )
+
+        # Create clean environment without Python/virtualenv variables
+        # This allows tools like 'uv' to use their own project's environment
+        clean_env = {
+            k: v for k, v in os.environ.items()
+            if k not in ("VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME", "CONDA_PREFIX")
+        }
+
+        if resolved_cwd:
+            logger.debug(f"Executing (cwd={resolved_cwd}): {' '.join(cmd)}")
+        else:
+            logger.debug(f"Executing: {' '.join(cmd)}")
+
+        return self._run_subprocess(cmd, timeout, cwd=resolved_cwd, env=clean_env)
+
+    def _run_subprocess(
+        self,
+        cmd: list[str],
+        timeout: int,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> ExecutionResult:
         """Run a subprocess and capture results.
 
         Args:
             cmd: Command to run
             timeout: Maximum execution time
+            cwd: Working directory (optional)
+            env: Environment variables (optional, defaults to current environment)
 
         Returns:
             ExecutionResult
@@ -270,6 +363,8 @@ class ScriptExecutor:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                cwd=cwd,
+                env=env,
             )
 
             duration_ms = int((time.time() - start_time) * 1000)

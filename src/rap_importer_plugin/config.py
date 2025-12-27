@@ -32,14 +32,18 @@ class ScriptConfig:
     """Configuration for a single script in the pipeline."""
 
     name: str
-    type: str  # "applescript" or "python"
-    path: str
+    type: str  # "applescript", "python", or "command"
+    path: str  # For command type: the command string; for others: script path
     enabled: bool = True
     args: dict[str, str] | list[str] = field(default_factory=dict)
+    cwd: str | None = None  # Optional working directory (supports ~ expansion)
 
     def __post_init__(self) -> None:
-        if self.type not in ("applescript", "python"):
-            raise ValueError(f"Invalid script type: {self.type}. Must be 'applescript' or 'python'")
+        if self.type not in ("applescript", "python", "command"):
+            raise ValueError(
+                f"Invalid script type: {self.type}. "
+                "Must be 'applescript', 'python', or 'command'"
+            )
 
 
 @dataclass
@@ -115,6 +119,7 @@ def _parse_script_config(data: dict[str, Any]) -> ScriptConfig:
         path=data["path"],
         enabled=data.get("enabled", True),
         args=data.get("args", {}),
+        cwd=data.get("cwd"),
     )
 
 

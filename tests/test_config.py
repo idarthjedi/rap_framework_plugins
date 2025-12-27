@@ -62,6 +62,37 @@ class TestScriptConfig:
         config = ScriptConfig(name="test", type="python", path="test.py")
         assert config.enabled is True
 
+    def test_valid_command_type(self) -> None:
+        """Command type should be accepted."""
+        config = ScriptConfig(name="test", type="command", path="echo hello")
+        assert config.type == "command"
+
+    def test_command_with_cwd(self) -> None:
+        """Command type with cwd should be accepted."""
+        config = ScriptConfig(
+            name="test",
+            type="command",
+            path="uv run rap test",
+            cwd="~/projects/rap"
+        )
+        assert config.cwd == "~/projects/rap"
+
+    def test_cwd_is_optional(self) -> None:
+        """cwd field should default to None."""
+        config = ScriptConfig(name="test", type="python", path="test.py")
+        assert config.cwd is None
+
+    def test_cwd_works_with_all_types(self) -> None:
+        """cwd should be accepted for all script types."""
+        for script_type in ("applescript", "python", "command"):
+            config = ScriptConfig(
+                name="test",
+                type=script_type,
+                path="test",
+                cwd="/some/path"
+            )
+            assert config.cwd == "/some/path"
+
 
 class TestPipelineConfig:
     """Tests for PipelineConfig."""
@@ -125,6 +156,33 @@ class TestLoadConfig:
         config = load_config(config_path)
         assert config.watch.base_folder == "~/test"
         assert len(config.pipeline.scripts) == 1
+
+    def test_load_config_with_command_and_cwd(self, tmp_path: Path) -> None:
+        """Should load config with command type and cwd field."""
+        config_data = {
+            "watch": {
+                "base_folder": "~/test"
+            },
+            "pipeline": {
+                "scripts": [
+                    {
+                        "name": "Test Command",
+                        "type": "command",
+                        "path": "uv run rap test {filename}",
+                        "cwd": "~/projects/rap",
+                        "args": []
+                    }
+                ]
+            }
+        }
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps(config_data))
+
+        config = load_config(config_path)
+        script = config.pipeline.scripts[0]
+        assert script.type == "command"
+        assert script.cwd == "~/projects/rap"
+        assert "{filename}" in script.path
 
     def test_missing_file_raises(self, tmp_path: Path) -> None:
         """Should raise FileNotFoundError for missing file."""

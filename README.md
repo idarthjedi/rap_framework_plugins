@@ -198,14 +198,53 @@ Configuration is stored in `config/config.json`:
 | notifications | on_error | true | Notify on errors |
 | notifications | on_success | false | Notify on success |
 
+### Script Types
+
+The pipeline supports three script types:
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `applescript` | Runs AppleScript via `osascript` | Built-in DEVONthink importer |
+| `python` | Runs Python script via current interpreter | Custom Python scripts |
+| `command` | Runs arbitrary shell command | `uv run`, `npm run`, etc. |
+
+#### Command Type Example
+
+The `command` type is useful for running CLI tools in different project directories:
+
+```json
+{
+  "name": "Scholarly Assessment",
+  "type": "command",
+  "path": "uv run rap scholarly_assessment",
+  "enabled": true,
+  "cwd": "~/projects/research_analysis_platform",
+  "args": ["{filename}", "--headless", "--output-dir=~/Obsidian/Slip-Box/{group_path}/"]
+}
+```
+
+The `cwd` field specifies the working directory for command execution. Both `cwd` and `args` support `~` expansion and variable substitution.
+
 ### Script Variable Substitution
 
-Scripts can use these variables in their args:
+Scripts can use these variables in their `path` (for command type) and `args`:
 - `{file_path}` - Full POSIX path to the file
 - `{relative_path}` - Path relative to watch folder
 - `{filename}` - Just the filename
 - `{database}` - First path component (database name)
 - `{group_path}` - Path between database and filename
+- `{log_level}` - Current log level (e.g., DEBUG, INFO, WARNING)
+
+### Script Configuration Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Human-readable script name |
+| `type` | string | Yes | `applescript`, `python`, or `command` |
+| `path` | string | Yes | Script path or command string |
+| `enabled` | boolean | No | Whether to run (default: true) |
+| `args` | list/dict | No | Additional arguments |
+| `cwd` | string | No | Working directory (for command type) |
 
 ## Folder Structure Reference
 

@@ -62,6 +62,17 @@ class TestFileVariables:
         assert d["filename"] == "file.pdf"
         assert d["database"] == "DB"
         assert d["group_path"] == ""
+        assert d["log_level"] == "INFO"  # Default value
+
+    def test_log_level_from_file(self) -> None:
+        """Should include log_level in variables from from_file."""
+        base = Path("/home/user/imports")
+        file = Path("/home/user/imports/MyDatabase/document.pdf")
+
+        vars = FileVariables.from_file(file, base, log_level="DEBUG")
+
+        assert vars.log_level == "DEBUG"
+        assert vars.as_dict()["log_level"] == "DEBUG"
 
 
 class TestScriptExecutor:
@@ -216,3 +227,275 @@ print(f"file={sys.argv[2]}")
         result = executor.execute(script, vars)
 
         assert result.success is False
+
+    def test_execute_command_simple(self, tmp_path: Path) -> None:
+        """Should execute a simple command."""
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="echo hello"
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path=""
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is True
+        assert "hello" in result.output
+
+    def test_execute_command_with_variable_substitution(self, tmp_path: Path) -> None:
+        """Should substitute variables in command string."""
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="echo {filename}"
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path=""
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is True
+        assert "file.pdf" in result.output
+
+    def test_execute_command_with_args(self, tmp_path: Path) -> None:
+        """Should append args to command."""
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="echo base",
+            args=["extra", "{database}"]
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/file.pdf",
+            filename="file.pdf",
+            database="TestDB",
+            group_path=""
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is True
+        assert "TestDB" in result.output
+
+    def test_execute_command_with_cwd(self, tmp_path: Path) -> None:
+        """Should execute command in specified working directory."""
+        work_dir = tmp_path / "workdir"
+        work_dir.mkdir()
+
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="pwd",
+            cwd=str(work_dir)
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path=""
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is True
+        assert "workdir" in result.output
+
+    def test_execute_command_cwd_with_tilde(self, tmp_path: Path) -> None:
+        """Should expand ~ in cwd path."""
+        import os
+
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="pwd",
+            cwd="~"
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path=""
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is True
+        assert os.path.expanduser("~") in result.output
+
+    def test_execute_command_missing_cwd(self, tmp_path: Path) -> None:
+        """Should fail if cwd directory does not exist."""
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="echo hello",
+            cwd="/nonexistent/directory"
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path=""
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is False
+        assert "does not exist" in result.error
+
+    def test_execute_command_with_quoted_args(self, tmp_path: Path) -> None:
+        """Should handle quoted arguments in command string."""
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path='echo "hello world"'
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path=""
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is True
+        assert "hello world" in result.output
+
+    def test_execute_command_invalid_parse(self, tmp_path: Path) -> None:
+        """Should handle unparseable command string."""
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path='echo "unclosed quote'
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path=""
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is False
+        assert "parse" in result.error.lower()
+
+    def test_execute_command_variable_in_cwd(self, tmp_path: Path) -> None:
+        """Should substitute variables in cwd path."""
+        db_dir = tmp_path / "TestDB"
+        db_dir.mkdir()
+
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="pwd",
+            cwd=str(tmp_path) + "/{database}"
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="TestDB/file.pdf",
+            filename="file.pdf",
+            database="TestDB",
+            group_path=""
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is True
+        assert "TestDB" in result.output
+
+    def test_execute_command_with_group_path(self, tmp_path: Path) -> None:
+        """Should substitute group_path variable correctly."""
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="echo --output-dir=/inbox/{group_path}/"
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/Folder/SubFolder/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path="Folder/SubFolder"
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is True
+        assert "--output-dir=/inbox/Folder/SubFolder/" in result.output
+
+    def test_execute_command_clears_virtualenv(self, tmp_path: Path, monkeypatch) -> None:
+        """Should clear VIRTUAL_ENV from environment for command type."""
+        # Set VIRTUAL_ENV in the current environment
+        monkeypatch.setenv("VIRTUAL_ENV", "/some/other/venv")
+
+        executor = ScriptExecutor(tmp_path)
+        # Use env command to list all environment variables
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="env"
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path=""
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is True
+        # VIRTUAL_ENV should NOT be in the output
+        assert "VIRTUAL_ENV=" not in result.output
+
+    def test_execute_command_with_log_level(self, tmp_path: Path) -> None:
+        """Should substitute log_level variable in command args."""
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="echo",
+            args=["--log-level={log_level}"]
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path="",
+            log_level="DEBUG"
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is True
+        assert "--log-level=DEBUG" in result.output

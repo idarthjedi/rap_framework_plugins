@@ -26,6 +26,7 @@ class PipelineManager:
         watch_config: WatchConfig,
         executor: ScriptExecutor,
         on_success: Callable[[], None] | None = None,
+        log_level: str = "INFO",
     ) -> None:
         """Initialize the pipeline manager.
 
@@ -34,11 +35,13 @@ class PipelineManager:
             watch_config: Watch configuration (for base folder)
             executor: Script executor instance
             on_success: Optional callback when file is successfully processed
+            log_level: Current log level (for variable substitution in scripts)
         """
         self.config = pipeline_config
         self.watch_config = watch_config
         self.executor = executor
         self.on_success = on_success
+        self.log_level = log_level
 
         # Track failed files and their retry counts
         self._failed_files: dict[str, int] = {}
@@ -74,7 +77,7 @@ class PipelineManager:
 
         # Create variables for substitution
         base_folder = self.watch_config.expanded_base_folder
-        variables = FileVariables.from_file(file_path, base_folder)
+        variables = FileVariables.from_file(file_path, base_folder, self.log_level)
 
         logger.debug(
             f"Variables: database={variables.database}, "
@@ -96,6 +99,10 @@ class PipelineManager:
                 logger.error(
                     f"Script '{script.name}' failed: {result.error}"
                 )
+                # Log stdout if present (may contain useful context)
+                if result.output:
+                    for line in result.output.splitlines():
+                        logger.error(f"  stdout: {line}")
 
                 # Track failure for retry
                 self._record_failure(file_key)
@@ -108,7 +115,12 @@ class PipelineManager:
 
                 return False
 
-            logger.debug(f"Script '{script.name}' completed: {result}")
+            # Log script output at INFO level if present
+            if result.output:
+                for line in result.output.splitlines():
+                    logger.info(f"  [{script.name}] {line}")
+            else:
+                logger.debug(f"Script '{script.name}' completed: {result}")
 
         # All scripts succeeded
         logger.info(f"Pipeline complete for: {file_path.name}")
