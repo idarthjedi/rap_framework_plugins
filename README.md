@@ -32,6 +32,8 @@ Drop PDF files into a watched folder structure that mirrors your DEVONthink data
 
 ## Prerequisites
 
+> **Note:** This tool is macOS-only. It uses AppleScript, macOS menu bar integration, and DEVONthink (a macOS application).
+
 - **macOS** (tested on macOS Sonoma)
 - **Python 3.12+**
 - **DEVONthink Pro** installed
