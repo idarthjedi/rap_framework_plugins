@@ -46,8 +46,14 @@ class ColoredFormatter(logging.Formatter):
         return message
 
 
-def setup_logging(config: LoggingConfig, level_override: str | None = None) -> logging.Logger:
-    """Configure logging with file rotation and console output.
+def setup_logging(
+    config: LoggingConfig,
+    level_override: str | None = None,
+) -> logging.Logger:
+    """Configure logging with file rotation and optional console output.
+
+    Console output is automatically enabled when stderr is a TTY (interactive
+    terminal) and disabled when running as a daemon (stderr redirected).
 
     Args:
         config: Logging configuration
@@ -86,15 +92,17 @@ def setup_logging(config: LoggingConfig, level_override: str | None = None) -> l
     file_handler.setFormatter(file_formatter)
     logger.addHandler(file_handler)
 
-    # Console handler with colors
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setLevel(level)
-    console_formatter = ColoredFormatter(
-        "%(asctime)s %(levelname)-5s [%(name)s] %(message)s",
-        datefmt="%H:%M:%S",
-    )
-    console_handler.setFormatter(console_formatter)
-    logger.addHandler(console_handler)
+    # Console handler with colors (only if stderr is a TTY)
+    # This auto-disables console output when running as a daemon
+    if sys.stderr.isatty():
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setLevel(level)
+        console_formatter = ColoredFormatter(
+            "%(asctime)s %(levelname)-5s [%(name)s] %(message)s",
+            datefmt="%H:%M:%S",
+        )
+        console_handler.setFormatter(console_formatter)
+        logger.addHandler(console_handler)
 
     return logger
 

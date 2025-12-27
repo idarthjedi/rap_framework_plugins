@@ -11,7 +11,8 @@ from pathlib import Path
 class ExecutionMode(Enum):
     """Execution mode for the application."""
 
-    BACKGROUND = "background"  # Continuous watching with menu bar
+    BACKGROUND = "background"  # Spawn daemon and exit (default)
+    FOREGROUND = "foreground"  # Run in foreground with menu bar (used by daemon)
     RUNONCE = "runonce"  # Process existing files and exit
 
 
@@ -39,7 +40,8 @@ def parse_args(args: list[str] | None = None) -> CLIArgs:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  rap-importer                     Run continuously with menu bar (default)
+  rap-importer                     Run in background, return to terminal (default)
+  rap-importer --foreground        Run in foreground with console output (debugging)
   rap-importer --runonce           Process existing files and exit
   rap-importer --config my.json    Use custom config file
   rap-importer --log-level DEBUG   Enable debug logging
@@ -52,7 +54,13 @@ Examples:
         "--background",
         action="store_true",
         dest="background",
-        help="Run continuously with menu bar icon (default)",
+        help="Run continuously in background, return control to terminal (default)",
+    )
+    mode_group.add_argument(
+        "--foreground",
+        action="store_true",
+        dest="foreground",
+        help="Run in foreground with console output (for testing/debugging)",
     )
     mode_group.add_argument(
         "--runonce",
@@ -95,6 +103,8 @@ Examples:
     # Determine execution mode
     if parsed.runonce:
         mode = ExecutionMode.RUNONCE
+    elif parsed.foreground:
+        mode = ExecutionMode.FOREGROUND
     else:
         mode = ExecutionMode.BACKGROUND  # Default
 

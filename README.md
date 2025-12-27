@@ -88,9 +88,25 @@ uv run rap-importer --background
 ```
 
 This will:
-1. Process any existing files in the watch folder
-2. Start watching for new files
+1. Spawn a background daemon process
+2. Return control to your terminal immediately
 3. Show a menu bar icon ("RAP") with status and quit option
+4. Process existing files and watch for new ones
+5. Log all activity to `~/Library/Logs/rap-importer.log`
+
+### Run in Foreground Mode (for debugging)
+
+```bash
+uv run rap-importer --foreground
+```
+
+This will:
+1. Run directly in your terminal (blocks until quit)
+2. Show log output in the console with colors
+3. Show a menu bar icon ("RAP") with status and quit option
+4. Process existing files and watch for new ones
+
+Use this mode when testing or debugging the watcher.
 
 ### Run Once Mode
 
@@ -103,17 +119,24 @@ uv run rap-importer --runonce
 ### Command-Line Options
 
 ```
-rap-importer [-h] [--background | --runonce] [--config FILE]
+rap-importer [-h] [--background | --foreground | --runonce] [--config FILE]
              [--log-level LEVEL] [--version]
 
 Options:
   -h, --help            Show help message
-  --background          Run continuously with menu bar icon (default)
+  --background          Run in background, return control to terminal (default)
+  --foreground          Run in foreground with console output (for debugging)
   --runonce             Process existing files and exit
   --config, -c FILE     Path to config file (default: config/config.json)
   --log-level, -l LEVEL Override log level (TRACE, DEBUG, INFO, WARNING, ERROR)
   --version, -v         Show version
 ```
+
+### Stopping the Background Daemon
+
+Use one of these methods to stop the running daemon:
+- Click "Quit" in the menu bar app
+- Find and kill the process: `pkill -f "rap_importer.main"`
 
 ## Configuration
 

@@ -25,6 +25,11 @@ class TestParseArgs:
         args = parse_args(["--runonce"])
         assert args.mode == ExecutionMode.RUNONCE
 
+    def test_foreground_flag(self) -> None:
+        """--foreground should set foreground mode (for debugging)."""
+        args = parse_args(["--foreground"])
+        assert args.mode == ExecutionMode.FOREGROUND
+
     def test_default_config_path(self) -> None:
         """Default config path should be config/config.json."""
         args = parse_args([])
