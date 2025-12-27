@@ -1,33 +1,46 @@
 {
-  "watch": {
-    "base_folder": "~/Documents/RAPPlatform-Import",
-    "file_patterns": ["*.pdf"],
-    "ignore_patterns": ["*.download", "*.crdownload", "*.tmp"],
-    "stability_check_seconds": 1.0,
-    "stability_timeout_seconds": 60
-  },
-  "pipeline": {
-    "retry_count": 3,
-    "retry_delay_seconds": 5,
-    "delete_on_success": true,
-    "scripts": [
-      {
-        "name": "DEVONthink Import",
-        "type": "applescript",
-        "path": "scripts/devonthink_importer.scpt",
-        "enabled": true,
-        "args": ["{file_path}", "{relative_path}"]
+  "watchers": [
+    {
+      "name": "RAP Research",
+      "enabled": true,
+      "watch": {
+        "base_folder": "~/Documents/RAPPlatform-Import",
+        "file_patterns": ["*.pdf"],
+        "ignore_patterns": ["*.download", "*.crdownload", "*.tmp"],
+        "stability_check_seconds": 1.0,
+        "stability_timeout_seconds": 60
       },
-      {
-        "name": "Scholarly Assessment",
-        "type": "command",
-        "path": "uv run rap scholarly_assessment",
-        "enabled": true,
-        "cwd": "~/development/anthropics/projects/research_analysis_platform",
-        "args": ["{file_path}", "--headless", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/", "--log-level={log_level}"]
+      "pipeline": {
+        "retry_count": 3,
+        "retry_delay_seconds": 5,
+        "delete_on_success": true,
+        "scripts": [
+          {
+            "name": "Import EndNote RIS",
+            "type": "command",
+            "path": "echo",
+            "enabled": true,
+            "args": ["{file_path}", "{relative_path}"]
+          },
+          {
+            "name": "DEVONthink Import",
+            "type": "applescript",
+            "path": "scripts/devonthink_importer.scpt",
+            "enabled": false,
+            "args": ["{file_path}", "{relative_path}"]
+          },
+          {
+            "name": "Scholarly Assessment",
+            "type": "command",
+            "path": "uv run rap scholarly_assessment",
+            "enabled": false,
+            "cwd": "~/development/anthropics/projects/research_analysis_platform",
+            "args": ["{file_path}", "--headless", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/", "--log-level={log_level}"]
+          }
+        ]
       }
-    ]
-  },
+    }
+  ],
   "logging": {
     "level": "INFO",
     "file": "~/Library/Logs/rap-importer.log",

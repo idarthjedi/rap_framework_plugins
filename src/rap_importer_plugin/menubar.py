@@ -11,7 +11,7 @@ import rumps
 from .logging_config import get_logger
 
 if TYPE_CHECKING:
-    from .pipeline import PipelineManager
+    from .main import WatcherInstance
 
 logger = get_logger("menubar")
 
@@ -21,40 +21,45 @@ class RAPImporterMenuBar(rumps.App):
 
     def __init__(
         self,
-        pipeline: PipelineManager,
+        watcher_instances: list[WatcherInstance],
         log_path: Path,
         on_quit: Callable[[], None],
     ) -> None:
         """Initialize the menu bar app.
 
         Args:
-            pipeline: Pipeline manager for file count
+            watcher_instances: List of watcher/pipeline pairs
             log_path: Path to log file (for "Open Log" action)
             on_quit: Callback to run when quitting
         """
         # Use a simple text icon (📄 could be used but text is more reliable)
         super().__init__("RAP", quit_button=None)
 
-        self.pipeline = pipeline
+        self.watcher_instances = watcher_instances
         self.log_path = log_path
         self.on_quit = on_quit
         self._last_count = 0
+        self._last_counts: dict[str, int] = {}
 
         # Build menu
         self._build_menu()
 
-        logger.debug("Menu bar app initialized")
+        logger.debug(f"Menu bar app initialized with {len(watcher_instances)} watchers")
 
     def _build_menu(self) -> None:
         """Build the menu structure."""
         # Status item (non-clickable)
-        self.status_item = rumps.MenuItem("RAP Importer - Running")
+        watcher_count = len(self.watcher_instances)
+        self.status_item = rumps.MenuItem(f"RAP Importer - {watcher_count} watchers")
 
-        # Counter item (non-clickable)
+        # Aggregate counter item (non-clickable)
         self.counter_item = rumps.MenuItem("Files processed: 0")
 
-        # Separator
-        separator = None
+        # Individual watcher items (non-clickable)
+        self.watcher_items: dict[str, rumps.MenuItem] = {}
+        for instance in self.watcher_instances:
+            item = rumps.MenuItem(f"  {instance.name}: 0")
+            self.watcher_items[instance.name] = item
 
         # Open log file
         self.log_item = rumps.MenuItem("Open Log File", callback=self._open_log)
@@ -62,23 +67,41 @@ class RAPImporterMenuBar(rumps.App):
         # Quit
         self.quit_item = rumps.MenuItem("Quit", callback=self._quit)
 
-        # Set up menu
-        self.menu = [
+        # Build menu list
+        menu_items: list[rumps.MenuItem | None] = [
             self.status_item,
             self.counter_item,
-            separator,
+        ]
+
+        # Add watcher items
+        for item in self.watcher_items.values():
+            menu_items.append(item)
+
+        menu_items.extend([
+            None,  # Separator
             self.log_item,
             self.quit_item,
-        ]
+        ])
+
+        self.menu = menu_items
 
     @rumps.timer(2)
     def _update_counter(self, _sender: rumps.Timer) -> None:
-        """Periodically update the file counter."""
-        count = self.pipeline.files_processed
-        if count != self._last_count:
-            self._last_count = count
-            self.counter_item.title = f"Files processed: {count}"
-            logger.debug(f"Updated counter: {count}")
+        """Periodically update the file counters."""
+        # Calculate aggregate count
+        total = sum(inst.pipeline.files_processed for inst in self.watcher_instances)
+
+        if total != self._last_count:
+            self._last_count = total
+            self.counter_item.title = f"Files processed: {total}"
+            logger.debug(f"Updated total counter: {total}")
+
+        # Update individual watcher counts
+        for instance in self.watcher_instances:
+            count = instance.pipeline.files_processed
+            if self._last_counts.get(instance.name) != count:
+                self._last_counts[instance.name] = count
+                self.watcher_items[instance.name].title = f"  {instance.name}: {count}"
 
     def _open_log(self, _sender: rumps.MenuItem) -> None:
         """Open the log file in Console.app."""
@@ -119,7 +142,7 @@ class RAPImporterMenuBar(rumps.App):
 
 
 def run_menubar(
-    pipeline: PipelineManager,
+    watcher_instances: list[WatcherInstance],
     log_path: Path,
     on_quit: Callable[[], None],
 ) -> None:
@@ -128,10 +151,10 @@ def run_menubar(
     This function blocks until the user quits the app.
 
     Args:
-        pipeline: Pipeline manager for file count
+        watcher_instances: List of watcher/pipeline pairs
         log_path: Path to log file
         on_quit: Callback to run when quitting
     """
-    app = RAPImporterMenuBar(pipeline, log_path, on_quit)
-    logger.info("Starting menu bar app")
+    app = RAPImporterMenuBar(watcher_instances, log_path, on_quit)
+    logger.info(f"Starting menu bar app with {len(watcher_instances)} watchers")
     app.run()

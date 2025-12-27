@@ -9,6 +9,7 @@ from pathlib import Path
 from rap_importer_plugin.config import (
     Config,
     WatchConfig,
+    WatcherConfig,
     PipelineConfig,
     ScriptConfig,
     LoggingConfig,
@@ -131,55 +132,153 @@ class TestLoggingConfig:
         assert not str(config.expanded_file).startswith("~")
 
 
+class TestWatcherConfig:
+    """Tests for WatcherConfig."""
+
+    def test_watcher_enabled_by_default(self) -> None:
+        """Watchers should be enabled by default."""
+        config = WatcherConfig(
+            name="test",
+            watch=WatchConfig(base_folder="~/test"),
+            pipeline=PipelineConfig(scripts=[]),
+        )
+        assert config.enabled is True
+
+    def test_watcher_with_name(self) -> None:
+        """Watcher should have a name."""
+        config = WatcherConfig(
+            name="My Watcher",
+            watch=WatchConfig(base_folder="~/test"),
+            pipeline=PipelineConfig(scripts=[]),
+        )
+        assert config.name == "My Watcher"
+
+    def test_watcher_can_be_disabled(self) -> None:
+        """Watcher can be disabled."""
+        config = WatcherConfig(
+            name="test",
+            watch=WatchConfig(base_folder="~/test"),
+            pipeline=PipelineConfig(scripts=[]),
+            enabled=False,
+        )
+        assert config.enabled is False
+
+
+class TestConfigWithWatchers:
+    """Tests for Config with watchers array."""
+
+    def test_enabled_watchers_property(self) -> None:
+        """Should filter to only enabled watchers."""
+        watchers = [
+            WatcherConfig(name="enabled1", watch=WatchConfig(base_folder="~/a"),
+                         pipeline=PipelineConfig(scripts=[]), enabled=True),
+            WatcherConfig(name="disabled", watch=WatchConfig(base_folder="~/b"),
+                         pipeline=PipelineConfig(scripts=[]), enabled=False),
+            WatcherConfig(name="enabled2", watch=WatchConfig(base_folder="~/c"),
+                         pipeline=PipelineConfig(scripts=[]), enabled=True),
+        ]
+        config = Config(watchers=watchers)
+
+        enabled = config.enabled_watchers
+        assert len(enabled) == 2
+        assert all(w.enabled for w in enabled)
+
+    def test_all_watchers_disabled(self) -> None:
+        """enabled_watchers should be empty when all are disabled."""
+        watchers = [
+            WatcherConfig(name="disabled1", watch=WatchConfig(base_folder="~/a"),
+                         pipeline=PipelineConfig(scripts=[]), enabled=False),
+            WatcherConfig(name="disabled2", watch=WatchConfig(base_folder="~/b"),
+                         pipeline=PipelineConfig(scripts=[]), enabled=False),
+        ]
+        config = Config(watchers=watchers)
+
+        assert len(config.enabled_watchers) == 0
+
+
 class TestLoadConfig:
     """Tests for loading config from file."""
 
-    def test_load_valid_config(self, tmp_path: Path) -> None:
-        """Should load a valid config file."""
+    def test_load_single_watcher(self, tmp_path: Path) -> None:
+        """Should load config with single watcher."""
         config_data = {
-            "watch": {
-                "base_folder": "~/test"
-            },
-            "pipeline": {
-                "scripts": [
-                    {
-                        "name": "Test",
-                        "type": "python",
-                        "path": "test.py"
+            "watchers": [
+                {
+                    "name": "Test Watcher",
+                    "watch": {"base_folder": "~/test"},
+                    "pipeline": {
+                        "scripts": [
+                            {
+                                "name": "Test",
+                                "type": "python",
+                                "path": "test.py"
+                            }
+                        ]
                     }
-                ]
-            }
+                }
+            ]
         }
         config_path = tmp_path / "config.json"
         config_path.write_text(json.dumps(config_data))
 
         config = load_config(config_path)
-        assert config.watch.base_folder == "~/test"
-        assert len(config.pipeline.scripts) == 1
+        assert len(config.watchers) == 1
+        assert config.watchers[0].name == "Test Watcher"
+        assert config.watchers[0].watch.base_folder == "~/test"
+        assert len(config.watchers[0].pipeline.scripts) == 1
+
+    def test_load_multiple_watchers(self, tmp_path: Path) -> None:
+        """Should load config with multiple watchers."""
+        config_data = {
+            "watchers": [
+                {
+                    "name": "Watcher A",
+                    "watch": {"base_folder": "~/a"},
+                    "pipeline": {"scripts": []}
+                },
+                {
+                    "name": "Watcher B",
+                    "enabled": False,
+                    "watch": {"base_folder": "~/b"},
+                    "pipeline": {"scripts": []}
+                }
+            ]
+        }
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps(config_data))
+
+        config = load_config(config_path)
+        assert len(config.watchers) == 2
+        assert config.watchers[0].enabled is True
+        assert config.watchers[1].enabled is False
+        assert len(config.enabled_watchers) == 1
 
     def test_load_config_with_command_and_cwd(self, tmp_path: Path) -> None:
         """Should load config with command type and cwd field."""
         config_data = {
-            "watch": {
-                "base_folder": "~/test"
-            },
-            "pipeline": {
-                "scripts": [
-                    {
-                        "name": "Test Command",
-                        "type": "command",
-                        "path": "uv run rap test {filename}",
-                        "cwd": "~/projects/rap",
-                        "args": []
+            "watchers": [
+                {
+                    "name": "Test Watcher",
+                    "watch": {"base_folder": "~/test"},
+                    "pipeline": {
+                        "scripts": [
+                            {
+                                "name": "Test Command",
+                                "type": "command",
+                                "path": "uv run rap test {filename}",
+                                "cwd": "~/projects/rap",
+                                "args": []
+                            }
+                        ]
                     }
-                ]
-            }
+                }
+            ]
         }
         config_path = tmp_path / "config.json"
         config_path.write_text(json.dumps(config_data))
 
         config = load_config(config_path)
-        script = config.pipeline.scripts[0]
+        script = config.watchers[0].pipeline.scripts[0]
         assert script.type == "command"
         assert script.cwd == "~/projects/rap"
         assert "{filename}" in script.path
@@ -189,18 +288,66 @@ class TestLoadConfig:
         with pytest.raises(FileNotFoundError):
             load_config(tmp_path / "nonexistent.json")
 
-    def test_missing_watch_section_raises(self, tmp_path: Path) -> None:
-        """Should raise ValueError for missing watch section."""
+    def test_missing_watchers_raises(self, tmp_path: Path) -> None:
+        """Should raise ValueError for missing watchers array."""
         config_path = tmp_path / "config.json"
-        config_path.write_text('{"pipeline": {}}')
+        config_path.write_text('{"logging": {}}')
+
+        with pytest.raises(ValueError, match="watchers"):
+            load_config(config_path)
+
+    def test_empty_watchers_raises(self, tmp_path: Path) -> None:
+        """Should raise ValueError for empty watchers array."""
+        config_path = tmp_path / "config.json"
+        config_path.write_text('{"watchers": []}')
+
+        with pytest.raises(ValueError, match="non-empty"):
+            load_config(config_path)
+
+    def test_watcher_missing_name_raises(self, tmp_path: Path) -> None:
+        """Should raise ValueError for watcher without name."""
+        config_data = {
+            "watchers": [
+                {
+                    "watch": {"base_folder": "~/test"},
+                    "pipeline": {"scripts": []}
+                }
+            ]
+        }
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps(config_data))
+
+        with pytest.raises(ValueError, match="name"):
+            load_config(config_path)
+
+    def test_watcher_missing_watch_raises(self, tmp_path: Path) -> None:
+        """Should raise ValueError for watcher without watch section."""
+        config_data = {
+            "watchers": [
+                {
+                    "name": "Test",
+                    "pipeline": {"scripts": []}
+                }
+            ]
+        }
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps(config_data))
 
         with pytest.raises(ValueError, match="watch"):
             load_config(config_path)
 
-    def test_missing_pipeline_section_raises(self, tmp_path: Path) -> None:
-        """Should raise ValueError for missing pipeline section."""
+    def test_watcher_missing_pipeline_raises(self, tmp_path: Path) -> None:
+        """Should raise ValueError for watcher without pipeline section."""
+        config_data = {
+            "watchers": [
+                {
+                    "name": "Test",
+                    "watch": {"base_folder": "~/test"}
+                }
+            ]
+        }
         config_path = tmp_path / "config.json"
-        config_path.write_text('{"watch": {"base_folder": "~/test"}}')
+        config_path.write_text(json.dumps(config_data))
 
         with pytest.raises(ValueError, match="pipeline"):
             load_config(config_path)

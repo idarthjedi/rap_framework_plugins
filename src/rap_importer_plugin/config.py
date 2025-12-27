@@ -91,13 +91,27 @@ class NotificationsConfig:
 
 
 @dataclass
+class WatcherConfig:
+    """Configuration for a single folder watcher with its pipeline."""
+
+    name: str
+    watch: WatchConfig
+    pipeline: PipelineConfig
+    enabled: bool = True
+
+
+@dataclass
 class Config:
     """Root configuration object."""
 
-    watch: WatchConfig
-    pipeline: PipelineConfig
+    watchers: list[WatcherConfig]
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
+
+    @property
+    def enabled_watchers(self) -> list[WatcherConfig]:
+        """Return only enabled watchers."""
+        return [w for w in self.watchers if w.enabled]
 
 
 def _parse_watch_config(data: dict[str, Any]) -> WatchConfig:
@@ -157,6 +171,35 @@ def _parse_notifications_config(data: dict[str, Any] | None) -> NotificationsCon
     )
 
 
+def _parse_watcher_config(data: dict[str, Any]) -> WatcherConfig:
+    """Parse a single watcher configuration from dict.
+
+    Args:
+        data: Watcher configuration dict
+
+    Returns:
+        Parsed WatcherConfig object
+
+    Raises:
+        ValueError: If required fields are missing
+    """
+    if "name" not in data:
+        raise ValueError("Watcher config must have a 'name'")
+    if "watch" not in data:
+        raise ValueError(f"Watcher '{data['name']}' must have a 'watch' section")
+    if "base_folder" not in data["watch"]:
+        raise ValueError(f"Watcher '{data['name']}' watch section must have 'base_folder'")
+    if "pipeline" not in data:
+        raise ValueError(f"Watcher '{data['name']}' must have a 'pipeline' section")
+
+    return WatcherConfig(
+        name=data["name"],
+        watch=_parse_watch_config(data["watch"]),
+        pipeline=_parse_pipeline_config(data["pipeline"]),
+        enabled=data.get("enabled", True),
+    )
+
+
 def load_config(config_path: str | Path) -> Config:
     """Load configuration from a JSON file.
 
@@ -180,16 +223,16 @@ def load_config(config_path: str | Path) -> Config:
         data = json.load(f)
 
     # Validate required sections
-    if "watch" not in data:
-        raise ValueError("Config must have a 'watch' section")
-    if "base_folder" not in data["watch"]:
-        raise ValueError("Config watch section must have 'base_folder'")
-    if "pipeline" not in data:
-        raise ValueError("Config must have a 'pipeline' section")
+    if "watchers" not in data:
+        raise ValueError("Config must have a 'watchers' array")
+
+    if not isinstance(data["watchers"], list) or len(data["watchers"]) == 0:
+        raise ValueError("Config 'watchers' must be a non-empty array")
+
+    watchers = [_parse_watcher_config(w) for w in data["watchers"]]
 
     return Config(
-        watch=_parse_watch_config(data["watch"]),
-        pipeline=_parse_pipeline_config(data["pipeline"]),
+        watchers=watchers,
         logging=_parse_logging_config(data.get("logging")),
         notifications=_parse_notifications_config(data.get("notifications")),
     )

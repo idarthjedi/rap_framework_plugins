@@ -7,7 +7,9 @@ import os
 import signal
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # Lock file to ensure single instance
 LOCK_FILE = Path.home() / ".rap-importer.lock"
@@ -21,7 +23,20 @@ from .notifications import setup_notifications
 from .pipeline import PipelineManager
 from .watcher import FileWatcher, scan_existing_files
 
+if TYPE_CHECKING:
+    from .config import Config, WatcherConfig
+
 logger = get_logger("main")
+
+
+@dataclass
+class WatcherInstance:
+    """Runtime instance of a watcher with its pipeline."""
+
+    name: str
+    watcher: FileWatcher
+    pipeline: PipelineManager
+    config: WatcherConfig
 
 
 def acquire_lock() -> bool:
@@ -96,10 +111,17 @@ def main() -> int:
         print("RAP Importer is already running", file=sys.stderr)
         return 1
 
+    # Validate we have enabled watchers
+    enabled_watchers = config.enabled_watchers
+    if not enabled_watchers:
+        print("Error: No enabled watchers in config", file=sys.stderr)
+        return 1
+
     # Setup logging (console output auto-detected based on TTY)
     logger_root = setup_logging(config.logging, args.log_level)
     logger.info("RAP Importer starting")
     logger.info(f"Config loaded from: {config_path}")
+    logger.info(f"Enabled watchers: {len(enabled_watchers)}")
 
     # Setup notifications
     setup_notifications(config.notifications)
@@ -111,55 +133,80 @@ def main() -> int:
     else:
         project_root = config_path.parent
 
-    # Create components
+    # Create shared executor
     executor = ScriptExecutor(project_root)
-    pipeline = PipelineManager(
-        pipeline_config=config.pipeline,
-        watch_config=config.watch,
-        executor=executor,
-        log_level=config.logging.level,
-    )
+
+    # Create watcher instances
+    watcher_instances: list[WatcherInstance] = []
+    for watcher_config in enabled_watchers:
+        pipeline = PipelineManager(
+            pipeline_config=watcher_config.pipeline,
+            watch_config=watcher_config.watch,
+            executor=executor,
+            log_level=config.logging.level,
+        )
+
+        watcher = FileWatcher(watcher_config.watch, pipeline.process_file)
+
+        watcher_instances.append(WatcherInstance(
+            name=watcher_config.name,
+            watcher=watcher,
+            pipeline=pipeline,
+            config=watcher_config,
+        ))
+
+        logger.info(f"Created watcher: {watcher_config.name} -> {watcher_config.watch.base_folder}")
 
     # Run in appropriate mode
     if args.mode == ExecutionMode.RUNONCE:
-        return run_once(config, pipeline)
+        return run_once(config, watcher_instances)
     else:
         # FOREGROUND mode: run with file watcher and menu bar
-        return run_foreground(config, pipeline)
+        return run_foreground(config, watcher_instances)
 
 
-def run_once(config, pipeline: PipelineManager) -> int:
+def run_once(config: Config, watcher_instances: list[WatcherInstance]) -> int:
     """Process all existing files and exit.
 
     Args:
         config: Application configuration
-        pipeline: Pipeline manager
+        watcher_instances: List of watcher/pipeline pairs
 
     Returns:
         Exit code
     """
-    logger.info("Running in run-once mode")
+    logger.info(f"Running in run-once mode with {len(watcher_instances)} watchers")
 
-    # Scan for existing files
-    files = scan_existing_files(config.watch)
+    total_files = 0
+    total_success = 0
 
-    if not files:
-        logger.info("No files to process")
-        return 0
+    for instance in watcher_instances:
+        # Scan for existing files
+        files = scan_existing_files(instance.config.watch)
 
-    logger.info(f"Found {len(files)} files to process")
+        if not files:
+            logger.info(f"[{instance.name}] No files to process")
+            continue
 
-    # Process each file
-    success_count = 0
-    for file_path in files:
-        if pipeline.process_file(file_path):
-            success_count += 1
+        logger.info(f"[{instance.name}] Found {len(files)} files to process")
 
-    # Report results
-    failed_count = len(files) - success_count
-    logger.info(f"Processing complete: {success_count} succeeded, {failed_count} failed")
+        # Process each file
+        success_count = 0
+        for file_path in files:
+            if instance.pipeline.process_file(file_path):
+                success_count += 1
 
-    return 0 if failed_count == 0 else 1
+        total_files += len(files)
+        total_success += success_count
+
+        failed_count = len(files) - success_count
+        logger.info(f"[{instance.name}] Complete: {success_count} succeeded, {failed_count} failed")
+
+    # Report overall results
+    total_failed = total_files - total_success
+    logger.info(f"Overall: {total_success}/{total_files} files processed successfully")
+
+    return 0 if total_failed == 0 else 1
 
 
 def spawn_daemon(args, config_path: Path) -> int:
@@ -202,15 +249,15 @@ def spawn_daemon(args, config_path: Path) -> int:
     return 0
 
 
-def run_foreground(config, pipeline: PipelineManager) -> int:
-    """Run continuously with file watcher and menu bar (foreground).
+def run_foreground(config: Config, watcher_instances: list[WatcherInstance]) -> int:
+    """Run continuously with file watchers and menu bar (foreground).
 
     This is the actual watcher loop, called either directly with --foreground
     or spawned as a daemon by the background mode.
 
     Args:
         config: Application configuration
-        pipeline: Pipeline manager
+        watcher_instances: List of watcher/pipeline pairs
 
     Returns:
         Exit code
@@ -219,10 +266,7 @@ def run_foreground(config, pipeline: PipelineManager) -> int:
     # (rumps initializes macOS event loop infrastructure that prevents clean exit)
     from .menubar import run_menubar
 
-    logger.info("Running in foreground mode with menu bar")
-
-    # Create watcher
-    watcher = FileWatcher(config.watch, pipeline.process_file)
+    logger.info(f"Running in foreground mode with {len(watcher_instances)} watchers")
 
     # Handle SIGINT/SIGTERM for graceful shutdown
     shutdown_requested = False
@@ -232,29 +276,34 @@ def run_foreground(config, pipeline: PipelineManager) -> int:
         if not shutdown_requested:
             shutdown_requested = True
             logger.info(f"Received signal {signum}, shutting down...")
-            watcher.stop()
+            for instance in watcher_instances:
+                instance.watcher.stop()
             sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
-    # Process existing files first
-    existing = scan_existing_files(config.watch)
-    if existing:
-        logger.info(f"Processing {len(existing)} existing files")
-        for file_path in existing:
-            pipeline.process_file(file_path)
+    # Process existing files first (for each watcher)
+    for instance in watcher_instances:
+        existing = scan_existing_files(instance.config.watch)
+        if existing:
+            logger.info(f"[{instance.name}] Processing {len(existing)} existing files")
+            for file_path in existing:
+                instance.pipeline.process_file(file_path)
 
-    # Start watching for new files
-    watcher.start()
+    # Start all watchers
+    for instance in watcher_instances:
+        instance.watcher.start()
+        logger.info(f"[{instance.name}] Started watching: {instance.config.watch.base_folder}")
 
     # Run menu bar app (blocks until quit)
     def on_quit() -> None:
         logger.info("Shutting down from menu bar")
-        watcher.stop()
+        for instance in watcher_instances:
+            instance.watcher.stop()
 
     log_path = config.logging.expanded_file
-    run_menubar(pipeline, log_path, on_quit)
+    run_menubar(watcher_instances, log_path, on_quit)
 
     return 0
 
