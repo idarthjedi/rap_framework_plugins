@@ -21,6 +21,7 @@ Drop PDF files into a watched folder structure that mirrors your DEVONthink data
 
 - **Python-based file watching** using watchdog for reliable, event-driven monitoring
 - **Configurable pipeline** with support for AppleScript and Python scripts
+- **Duplicate detection**: SHA-1 hash-based detection prevents importing the same file twice
 - **Two execution modes**:
   - `--background` (default): Continuous watching with macOS menu bar icon
   - `--runonce`: Process existing files and exit (great for cron jobs)
@@ -196,6 +197,37 @@ Scripts can use these variables in their args:
 - **Groups auto-created**: Non-Inbox groups are created automatically
 - **Smart rules triggered**: After OCR, smart rules with "OCR event" trigger are executed
 - **Original deleted**: Successfully imported files are moved to Trash (configurable)
+
+## Duplicate Detection
+
+The importer uses SHA-1 hash-based duplicate detection to prevent importing the same file multiple times.
+
+### How It Works
+
+1. **Before import**: Calculate SHA-1 hash of the incoming file
+2. **Search database**: Look for existing records with matching `sourceHash` custom metadata
+3. **If duplicate found**: Replicate the existing record to the destination folder (no new file created)
+4. **If no duplicate**: Import via OCR and store the hash as `sourceHash` metadata
+
+### Why Custom Metadata?
+
+DEVONthink's built-in `contentHash` property changes after OCR processing (the PDF is modified during OCR). To detect true duplicates, we store the original file's SHA-1 hash as custom metadata before any processing occurs.
+
+### Behavior Summary
+
+| Scenario | Result | Return Value |
+|----------|--------|--------------|
+| New file | OCR import, store hash | `"success"` |
+| Duplicate, different folder | Replicate to destination | `"replicated"` |
+| Duplicate, same folder | No action needed | `"replicated"` |
+| Duplicate, different database | OCR import (search is per-database) | `"success"` |
+
+### Viewing Source Hash
+
+To see the stored hash for a record in DEVONthink:
+1. Select the record
+2. Open the Info inspector (⌘I)
+3. Look for "sourceHash" in Custom metadata
 
 ## Troubleshooting
 
