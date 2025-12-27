@@ -1,6 +1,6 @@
 -- ============================================================
 -- DEVONthink Import Script
--- Simplified script for single-file import with OCR
+-- Single-file import with OCR and duplicate detection
 --
 -- Called by Python watcher with:
 --   osascript devonthink_importer.scpt "file_path" "relative_path"
@@ -10,7 +10,16 @@
 --   relative_path - Path relative to watch folder
 --                   (e.g., "Liberty.University/BUSI770/Week01/file.pdf")
 --
--- Returns: "success" on success, throws error on failure
+-- Returns:
+--   "success"    - New file imported via OCR
+--   "replicated" - Existing record replicated (duplicate detected)
+--   Throws error on failure
+--
+-- Duplicate Detection:
+--   Uses SHA-1 hash of original file stored as custom metadata "sourceHash".
+--   DEVONthink's built-in contentHash changes after OCR processing, so we
+--   calculate and store the original file hash before import. Future imports
+--   search for records with matching sourceHash to detect duplicates.
 -- ============================================================
 
 on run argv
@@ -35,19 +44,72 @@ on run argv
 	-- Get or create destination group
 	set destGroup to my getOrCreateDestinationGroup(theDatabase, groupPath, isInbox, isRootLevel)
 
-	-- OCR and import
-	tell application id "DNtp"
-		set theRecord to ocr file filePath to destGroup
+	-- Calculate SHA-1 hash of incoming file
+	set fileHash to my calculateFileHash(filePath)
 
-		if exists theRecord then
-			-- Trigger smart rules
-			perform smart rule record theRecord trigger OCR event
-			return "success"
-		else
-			error "OCR did not return a record" number 1006
-		end if
-	end tell
+	-- Check for existing record with same content hash
+	set existingRecord to my findRecordByHash(fileHash, theDatabase)
+
+	if existingRecord is not missing value then
+		-- Duplicate found: replicate to destination group
+		tell application id "DNtp"
+			replicate record existingRecord to destGroup
+		end tell
+		return "replicated"
+	else
+		-- No duplicate: OCR and import
+		tell application id "DNtp"
+			set theRecord to ocr file filePath to destGroup
+
+			if exists theRecord then
+				-- Store original file hash as custom metadata for future duplicate detection
+				-- (DEVONthink's contentHash changes after OCR, so we preserve the original)
+				add custom meta data fileHash for "sourceHash" to theRecord
+
+				-- Trigger smart rules
+				perform smart rule record theRecord trigger OCR event
+				return "success"
+			else
+				error "OCR did not return a record" number 1006
+			end if
+		end tell
+	end if
 end run
+
+-- ===================
+-- HASH UTILITIES
+-- ===================
+
+on calculateFileHash(filePath)
+	-- Calculate SHA-1 hash of file using shasum command
+	try
+		set hashResult to do shell script "shasum -a 1 " & quoted form of filePath & " | awk '{print $1}'"
+		return hashResult
+	on error errMsg
+		error "Failed to calculate file hash: " & errMsg number 1007
+	end try
+end calculateFileHash
+
+on findRecordByHash(fileHash, theDatabase)
+	-- Search database for a record with matching sourceHash custom metadata
+	-- Note: DEVONthink's contentHash changes after OCR, so we store original
+	-- file hash as custom metadata "sourceHash" and search by that
+	tell application id "DNtp"
+		try
+			-- Custom metadata fields are searchable with "md" prefix (case-insensitive)
+			-- Critical: "in" must be OUTSIDE the search parentheses to scope correctly
+			set searchResults to (search "mdsourcehash:" & fileHash) in root of theDatabase
+			if (count of searchResults) > 0 then
+				return item 1 of searchResults
+			else
+				return missing value
+			end if
+		on error
+			-- Search failed, treat as no duplicate found
+			return missing value
+		end try
+	end tell
+end findRecordByHash
 
 -- ===================
 -- PATH PARSING
