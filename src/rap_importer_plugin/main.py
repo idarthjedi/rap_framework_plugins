@@ -39,24 +39,83 @@ class WatcherInstance:
     config: WatcherConfig
 
 
-def acquire_lock() -> bool:
-    """Acquire exclusive lock to ensure single instance.
+def _is_process_running(pid: int) -> bool:
+    """Check if a process with the given PID is running.
+
+    Args:
+        pid: Process ID to check
 
     Returns:
-        True if lock acquired, False if another instance is running.
+        True if process is running, False otherwise
+    """
+    try:
+        # Signal 0 doesn't send anything, just checks if process exists
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        # Process doesn't exist
+        return False
+    except PermissionError:
+        # Process exists but we don't have permission (still running)
+        return True
+
+
+def _try_acquire_lock() -> bool:
+    """Attempt to acquire the lock file.
+
+    Returns:
+        True if lock acquired, False if held by another process.
     """
     global _lock_file_handle
 
     try:
         _lock_file_handle = open(LOCK_FILE, "w")
         fcntl.flock(_lock_file_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        # Write PID for informational purposes
+        # Write PID for later stale lock detection
         _lock_file_handle.write(str(os.getpid()))
         _lock_file_handle.flush()
         return True
     except (IOError, OSError):
         # Lock is held by another process
+        if _lock_file_handle:
+            _lock_file_handle.close()
+            _lock_file_handle = None
         return False
+
+
+def acquire_lock() -> bool:
+    """Acquire exclusive lock to ensure single instance.
+
+    If the lock file exists but the owning process is no longer running
+    (stale lock from crash), the stale lock is removed and a fresh lock
+    is acquired.
+
+    Returns:
+        True if lock acquired, False if another instance is running.
+    """
+    # First attempt
+    if _try_acquire_lock():
+        return True
+
+    # Lock failed - check if it's stale
+    try:
+        with open(LOCK_FILE, "r") as f:
+            pid_str = f.read().strip()
+            if pid_str:
+                pid = int(pid_str)
+                if not _is_process_running(pid):
+                    # Stale lock - process is gone, remove and retry
+                    LOCK_FILE.unlink(missing_ok=True)
+                    return _try_acquire_lock()
+    except (IOError, OSError, ValueError):
+        # Can't read PID or invalid format - try removing anyway
+        try:
+            LOCK_FILE.unlink(missing_ok=True)
+            return _try_acquire_lock()
+        except (IOError, OSError):
+            pass
+
+    return False
 
 
 def release_lock() -> None:
