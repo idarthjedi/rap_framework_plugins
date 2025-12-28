@@ -18,22 +18,22 @@
           {
             "name": "Import EndNote RIS",
             "type": "command",
-            "path": "echo",
+            "path": "cp",
             "enabled": true,
-            "args": ["{file_path}", "{relative_path}"]
+            "args": ["{file_path}", "~/Documents/RAPPlatform-Import-EndNote/{filename}"]
           },
           {
             "name": "DEVONthink Import",
             "type": "applescript",
             "path": "scripts/devonthink_importer.scpt",
-            "enabled": false,
+            "enabled": true,
             "args": ["{file_path}", "{relative_path}"]
           },
           {
             "name": "Scholarly Assessment",
             "type": "command",
             "path": "uv run rap scholarly_assessment",
-            "enabled": false,
+            "enabled": true,
             "cwd": "~/development/anthropics/projects/research_analysis_platform",
             "args": ["{file_path}", "--headless", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/", "--log-level={log_level}"]
           }
