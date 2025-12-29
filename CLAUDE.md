@@ -103,6 +103,7 @@ Add to `config/config.json`:
 ```json
 {
   "name": "My Script",
+  "reqs": "Description of requirements/dependencies for this script",
   "type": "python",
   "path": "scripts/my_script.py",
   "enabled": true,
@@ -110,12 +111,23 @@ Add to `config/config.json`:
 }
 ```
 
+Script configuration fields:
+- `name` - Display name for the script
+- `reqs` - (Optional) Requirements/dependencies description (e.g., "DEVONthink 4 must be running")
+- `type` - Script type: `"applescript"`, `"python"`, or `"command"`
+- `path` - Script path (relative to project) or command string
+- `enabled` - Whether to run this script
+- `args` - Arguments with variable substitution
+- `cwd` - (Optional) Working directory for command type
+
 Variable substitution in args:
-- `{file_path}` - Full POSIX path
+- `{file_path}` - Full POSIX path to the file
 - `{relative_path}` - Path from watch folder
-- `{filename}` - Just filename
-- `{database}` - First path component
+- `{filename}` - Just the filename
+- `{database}` - First path component (for DEVONthink routing)
 - `{group_path}` - Path between database and filename
+- `{base_folder}` - The watch folder base path
+- `{log_level}` - Current log level (DEBUG, INFO, etc.)
 
 ## DEVONthink AppleScript Reference
 

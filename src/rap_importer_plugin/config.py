@@ -34,6 +34,7 @@ class ScriptConfig:
     name: str
     type: str  # "applescript", "python", or "command"
     path: str  # For command type: the command string; for others: script path
+    reqs: str = ""  # Requirements/dependencies description for this script
     enabled: bool = True
     args: dict[str, str] | list[str] = field(default_factory=dict)
     cwd: str | None = None  # Optional working directory (supports ~ expansion)
@@ -131,6 +132,7 @@ def _parse_script_config(data: dict[str, Any]) -> ScriptConfig:
         name=data["name"],
         type=data["type"],
         path=data["path"],
+        reqs=data.get("reqs", ""),
         enabled=data.get("enabled", True),
         args=data.get("args", {}),
         cwd=data.get("cwd"),

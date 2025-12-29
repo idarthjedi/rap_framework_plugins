@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -44,6 +45,7 @@ class RAPImporterMenuBar(rumps.App):
         self._startup_done = False
         self._last_count = 0
         self._last_counts: dict[str, int] = {}
+        self._last_failed_count = 0
 
         # Build menu
         self._build_menu()
@@ -65,6 +67,9 @@ class RAPImporterMenuBar(rumps.App):
             item = rumps.MenuItem(f"  {instance.name}: 0")
             self.watcher_items[instance.name] = item
 
+        # Retry failed files
+        self.retry_item = rumps.MenuItem("Retry - 0", callback=self._retry)
+
         # Open log file
         self.log_item = rumps.MenuItem("Open Log File", callback=self._open_log)
 
@@ -83,6 +88,7 @@ class RAPImporterMenuBar(rumps.App):
 
         menu_items.extend([
             None,  # Separator
+            self.retry_item,
             self.log_item,
             self.quit_item,
         ])
@@ -120,6 +126,44 @@ class RAPImporterMenuBar(rumps.App):
             if self._last_counts.get(instance.name) != count:
                 self._last_counts[instance.name] = count
                 self.watcher_items[instance.name].title = f"  {instance.name}: {count}"
+
+        # Update failed files count
+        failed_count = sum(
+            len(inst.pipeline.get_failed_files()) for inst in self.watcher_instances
+        )
+        if failed_count != self._last_failed_count:
+            self._last_failed_count = failed_count
+            self.retry_item.title = f"Retry - {failed_count}"
+            logger.debug(f"Updated failed counter: {failed_count}")
+
+    def _retry(self, _sender: rumps.MenuItem) -> None:
+        """Retry all failed files by re-dispatching to normal processing flow."""
+        # Collect failed files and their watchers before clearing
+        files_to_retry: list[tuple[WatcherInstance, Path]] = []
+        for instance in self.watcher_instances:
+            for file_key in instance.pipeline.get_failed_files():
+                file_path = Path(file_key)
+                if file_path.exists():
+                    files_to_retry.append((instance, file_path))
+
+        if not files_to_retry:
+            logger.info("No failed files to retry")
+            return
+
+        logger.info(f"Retrying {len(files_to_retry)} failed files")
+
+        # Clear failure tracking so files aren't skipped
+        for instance in self.watcher_instances:
+            instance.pipeline.reset_failures()
+
+        # Re-dispatch each file through the normal watcher callback (same as watchdog)
+        # Run in background thread to keep UI responsive
+        def do_retry() -> None:
+            for instance, file_path in files_to_retry:
+                instance.watcher.on_file_ready(file_path)
+
+        thread = threading.Thread(target=do_retry, daemon=True)
+        thread.start()
 
     def _open_log(self, _sender: rumps.MenuItem) -> None:
         """Open the log file in Console.app."""

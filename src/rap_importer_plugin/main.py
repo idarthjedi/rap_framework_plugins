@@ -1,4 +1,29 @@
-"""Main entry point for RAP Importer."""
+"""Main entry point for RAP Importer.
+
+Execution Modes
+---------------
+The application supports three execution modes:
+
+1. BACKGROUND (default): "Trampoline" mode - validates config, checks the lock,
+   then spawns itself with --foreground as a detached daemon process. Returns
+   immediately to the terminal. Logs go to file, not terminal.
+
+   Usage: uv run rap-importer
+
+2. FOREGROUND: The actual worker mode - runs the menu bar app, file watchers,
+   and pipeline processing. Blocks until quit. Used for debugging (see logs in
+   real-time) or when managed by launchd/systemd.
+
+   Usage: uv run rap-importer --foreground
+
+3. RUNONCE: Process all existing files in watch folders and exit. Returns
+   exit code 0 if all succeeded, 1 if any failed. Useful for CI/scripts.
+
+   Usage: uv run rap-importer --runonce
+
+The key insight: FOREGROUND mode is the actual worker - BACKGROUND mode just
+spawns it detached and returns to the terminal.
+"""
 
 from __future__ import annotations
 
@@ -271,6 +296,16 @@ def run_once(config: Config, watcher_instances: list[WatcherInstance]) -> int:
 def spawn_daemon(args, config_path: Path) -> int:
     """Spawn the importer as a background daemon and return immediately.
 
+    This is the "trampoline" - it re-invokes this same module with --foreground
+    flag, but detached from the terminal. The spawned process becomes the actual
+    worker (run_foreground), while this process exits immediately so the user
+    gets their terminal back.
+
+    The spawned daemon:
+    - Runs in a new session (start_new_session=True) detached from terminal
+    - Has stdout/stderr redirected to /dev/null (logs go to file instead)
+    - Acquires its own lock (we released ours before spawning)
+
     Args:
         args: Parsed CLI arguments
         config_path: Path to config file
@@ -311,15 +346,25 @@ def spawn_daemon(args, config_path: Path) -> int:
 def run_foreground(config: Config, watcher_instances: list[WatcherInstance]) -> int:
     """Run continuously with file watchers and menu bar (foreground).
 
-    This is the actual watcher loop, called either directly with --foreground
-    or spawned as a daemon by the background mode.
+    This is the actual worker - the long-running process that:
+    - Shows the menu bar icon (via rumps)
+    - Watches folders for new files (via watchdog FSEvents)
+    - Processes files through the pipeline
+    - Handles graceful shutdown on SIGINT/SIGTERM
+
+    Called either:
+    - Directly with --foreground (for debugging, launchd, or systemd)
+    - Spawned as a detached daemon by spawn_daemon() in background mode
+
+    When debugging, use: uv run rap-importer --foreground --log-level DEBUG
+    to see all logs in real-time in the terminal.
 
     Args:
         config: Application configuration
         watcher_instances: List of watcher/pipeline pairs
 
     Returns:
-        Exit code
+        Exit code (0 on clean shutdown)
     """
     # Import menubar lazily to avoid importing rumps in runonce mode
     # (rumps initializes macOS event loop infrastructure that prevents clean exit)

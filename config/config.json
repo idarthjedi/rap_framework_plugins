@@ -17,6 +17,7 @@
         "scripts": [
           {
             "name": "Import EndNote RIS",
+            "reqs": "EndNote 2025 (tested) must be running, and an auto import folder configured.",
             "type": "command",
             "path": "cp",
             "enabled": true,
@@ -24,6 +25,7 @@
           },
           {
             "name": "DEVONthink Import",
+            "reqs": "DEVONthink 4 (tested) must be running",
             "type": "applescript",
             "path": "scripts/devonthink_importer.scpt",
             "enabled": true,
@@ -31,6 +33,7 @@
           },
           {
             "name": "Scholarly Assessment",
+            "reqs": "Research Assistant Platform setup and configured correctly for the specified plan",
             "type": "command",
             "path": "uv run rap scholarly_assessment",
             "enabled": true,
