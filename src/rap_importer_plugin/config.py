@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import jsonschema
+
 
 @dataclass
 class WatchConfig:
@@ -208,6 +210,45 @@ def _parse_watcher_config(data: dict[str, Any]) -> WatcherConfig:
     )
 
 
+def _load_schema(config_path: Path) -> dict[str, Any] | None:
+    """Load JSON schema from config directory.
+
+    Args:
+        config_path: Path to config.json file
+
+    Returns:
+        Schema dict if found, None otherwise
+    """
+    schema_path = config_path.parent / "config.schema.json"
+    if schema_path.exists():
+        with open(schema_path) as f:
+            return json.load(f)
+    return None
+
+
+def _validate_schema(data: dict[str, Any], schema: dict[str, Any], config_path: Path) -> None:
+    """Validate config data against JSON schema.
+
+    Args:
+        data: Parsed config data
+        schema: JSON schema dict
+        config_path: Path to config file (for error messages)
+
+    Raises:
+        ValueError: If validation fails
+    """
+    try:
+        jsonschema.validate(data, schema)
+    except jsonschema.ValidationError as e:
+        # Build user-friendly error message
+        path = " -> ".join(str(p) for p in e.absolute_path) if e.absolute_path else "root"
+        raise ValueError(
+            f"Config validation failed at '{path}':\n"
+            f"  {e.message}\n"
+            f"  Schema path: {' -> '.join(str(p) for p in e.absolute_schema_path)}"
+        ) from None
+
+
 def load_config(config_path: str | Path) -> Config:
     """Load configuration from a JSON file.
 
@@ -220,7 +261,7 @@ def load_config(config_path: str | Path) -> Config:
     Raises:
         FileNotFoundError: If config file doesn't exist
         json.JSONDecodeError: If config file is invalid JSON
-        ValueError: If config is missing required fields
+        ValueError: If config fails schema validation or is missing required fields
     """
     config_path = Path(config_path)
 
@@ -230,7 +271,12 @@ def load_config(config_path: str | Path) -> Config:
     with open(config_path) as f:
         data = json.load(f)
 
-    # Validate required sections
+    # Validate against JSON schema if available
+    schema = _load_schema(config_path)
+    if schema:
+        _validate_schema(data, schema, config_path)
+
+    # Legacy validation (kept for backwards compatibility with configs without schema)
     if "watchers" not in data:
         raise ValueError("Config must have a 'watchers' array")
 

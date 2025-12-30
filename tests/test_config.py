@@ -461,6 +461,132 @@ class TestLoadConfig:
             load_config(config_path)
 
 
+class TestSchemaValidationOnLoad:
+    """Tests for JSON schema validation in load_config."""
+
+    def test_valid_config_passes_schema(self, tmp_path: Path) -> None:
+        """Valid config should pass schema validation."""
+        # Create config directory with schema
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+
+        schema = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "required": ["watchers"],
+            "properties": {
+                "watchers": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "watch", "pipeline"],
+                        "properties": {
+                            "name": {"type": "string"},
+                            "watch": {
+                                "type": "object",
+                                "required": ["base_folder"],
+                                "properties": {"base_folder": {"type": "string"}}
+                            },
+                            "pipeline": {
+                                "type": "object",
+                                "properties": {
+                                    "scripts": {"type": "array"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        (config_dir / "config.schema.json").write_text(json.dumps(schema))
+
+        config_data = {
+            "watchers": [{
+                "name": "Test",
+                "watch": {"base_folder": "~/test"},
+                "pipeline": {"scripts": []}
+            }]
+        }
+        (config_dir / "config.json").write_text(json.dumps(config_data))
+
+        # Should not raise
+        config = load_config(config_dir / "config.json")
+        assert config.watchers[0].name == "Test"
+
+    def test_invalid_config_fails_schema(self, tmp_path: Path) -> None:
+        """Config with wrong types should fail schema validation."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+
+        schema = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "required": ["watchers"],
+            "properties": {
+                "watchers": {
+                    "type": "array",
+                    "minItems": 1
+                }
+            }
+        }
+        (config_dir / "config.schema.json").write_text(json.dumps(schema))
+
+        # watchers should be array, not string
+        config_data = {"watchers": "not an array"}
+        (config_dir / "config.json").write_text(json.dumps(config_data))
+
+        with pytest.raises(ValueError, match="Config validation failed"):
+            load_config(config_dir / "config.json")
+
+    def test_schema_validation_shows_path(self, tmp_path: Path) -> None:
+        """Schema validation error should show path to invalid field."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+
+        schema = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "required": ["watchers"],
+            "properties": {
+                "watchers": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+        (config_dir / "config.schema.json").write_text(json.dumps(schema))
+
+        # name should be string, not number
+        config_data = {"watchers": [{"name": 123}]}
+        (config_dir / "config.json").write_text(json.dumps(config_data))
+
+        with pytest.raises(ValueError, match="watchers -> 0 -> name"):
+            load_config(config_dir / "config.json")
+
+    def test_missing_schema_skips_validation(self, tmp_path: Path) -> None:
+        """Config without schema file should skip schema validation."""
+        # No schema file, just config
+        config_data = {
+            "watchers": [{
+                "name": "Test",
+                "watch": {"base_folder": "~/test"},
+                "pipeline": {"scripts": []}
+            }]
+        }
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps(config_data))
+
+        # Should work fine without schema
+        config = load_config(config_path)
+        assert config.watchers[0].name == "Test"
+
+
 class TestFindConfigFile:
     """Tests for finding config file."""
 

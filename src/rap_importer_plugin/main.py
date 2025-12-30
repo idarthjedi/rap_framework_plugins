@@ -180,6 +180,11 @@ def main() -> int:
         print(f"Error loading config: {e}", file=sys.stderr)
         return 1
 
+    # Handle simulation mode (before lock acquisition)
+    if args.simulate_paths is not None:
+        from .simulate import run_simulation
+        return run_simulation(config, args.simulate_paths)
+
     # BACKGROUND mode: check if already running, then spawn daemon and exit
     if args.mode == ExecutionMode.BACKGROUND:
         # Quick check if another instance is running

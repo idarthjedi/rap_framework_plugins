@@ -511,3 +511,49 @@ print(f"file={sys.argv[2]}")
 
         assert result.success is True
         assert "--log-level=DEBUG" in result.output
+
+    def test_execute_command_unknown_variable_in_args(self, tmp_path: Path) -> None:
+        """Should return descriptive error for unknown variable in args."""
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="echo",
+            args=["{unknown_var}", "{another_bad_var}"]
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path=""
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is False
+        assert "unknown_var" in result.error
+        assert "Available variables" in result.error
+        assert "{base_folder}" in result.error
+
+    def test_execute_command_unknown_variable_in_path(self, tmp_path: Path) -> None:
+        """Should return descriptive error for unknown variable in command path."""
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="echo {nonexistent}"
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path=""
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is False
+        assert "nonexistent" in result.error
+        assert "Available variables" in result.error

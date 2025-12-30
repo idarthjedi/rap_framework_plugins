@@ -22,9 +22,9 @@
             "type": "command",
             "path": "cp",
             "enabled": true,
-            "args": ["{file_path}", "~/Documents/RAPPlatform-Import/EndNote/{filename}"],
-            "include_paths": ["Liberty University/*"],
-            "exclude_paths": ["Liberty University/Artificial Intelligence/*", "Liberty University/Harvard Business Review/*"]
+            "args": ["{file_path}", "{base_folder}/{database}/EndNote/{filename}"],
+            "include_paths": ["Liberty.University/*"],
+            "exclude_paths": ["Liberty.University/Artificial Intelligence/*", "Liberty.University/Harvard Business Review/*"]
           },
           {
             "name": "DEVONthink Import",
@@ -33,7 +33,7 @@
             "path": "scripts/devonthink_importer.scpt",
             "enabled": true,
             "args": ["{file_path}", "{relative_path}"],
-            "include_paths": ["Liberty University/*"]
+            "include_paths": ["Liberty.University/*"]
           },
           {
             "name": "Scholarly Assessment",
@@ -43,8 +43,8 @@
             "enabled": true,
             "cwd": "~/development/anthropics/projects/research_analysis_platform",
             "args": ["{file_path}", "--headless", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/", "--log-level={log_level}"],
-            "include_paths": ["Liberty University/*"],
-            "exclude_paths": ["Liberty University/Harvard Business Review/*"]
+            "include_paths": ["Liberty.University/*"],
+            "exclude_paths": ["Liberty.University/Harvard Business Review/*"]
           },
           {
             "name": "Harvard Business Review Assessment",
@@ -54,7 +54,7 @@
             "enabled": true,
             "cwd": "~/development/anthropics/projects/research_analysis_platform",
             "args": ["{file_path}", "--headless", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/", "--log-level={log_level}"],
-            "include_paths": ["Liberty University/Harvard Business Review/*"]
+            "include_paths": ["Liberty.University/Harvard Business Review/*"]
           }
         ]
       }

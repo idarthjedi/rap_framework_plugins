@@ -139,16 +139,26 @@ class ScriptExecutor:
         """
         logger.debug(f"Executing script: {script.name} ({script.type})")
 
-        # Substitute variables in args
-        substituted_args = self._substitute_args(script.args, variables)
-        var_dict = variables.as_dict()
+        # Substitute variables in args, path, and cwd
+        try:
+            substituted_args = self._substitute_args(script.args, variables)
+            var_dict = variables.as_dict()
 
-        # Handle command type separately (path is a command string, not a file)
-        if script.type == "command":
-            substituted_command = script.path.format(**var_dict)
-            substituted_cwd = script.cwd.format(**var_dict) if script.cwd else None
-            return self._execute_command(
-                substituted_command, substituted_args, substituted_cwd, timeout
+            # Handle command type separately (path is a command string, not a file)
+            if script.type == "command":
+                substituted_command = self._substitute_string(script.path, var_dict)
+                substituted_cwd = self._substitute_string(script.cwd, var_dict) if script.cwd else None
+                return self._execute_command(
+                    substituted_command, substituted_args, substituted_cwd, timeout
+                )
+        except ValueError as e:
+            # Unknown variable in substitution
+            logger.error(f"Variable substitution error in script '{script.name}': {e}")
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=str(e),
+                duration_ms=0,
             )
 
         # For applescript and python, resolve and validate script path
@@ -188,6 +198,33 @@ class ScriptExecutor:
             return script_path
         return self.project_root / script_path
 
+    def _substitute_string(
+        self,
+        value: str,
+        var_dict: dict[str, str],
+    ) -> str:
+        """Substitute variables in a single string.
+
+        Args:
+            value: String with {variable} placeholders
+            var_dict: Variables dictionary
+
+        Returns:
+            String with variables substituted
+
+        Raises:
+            ValueError: If an unknown variable is referenced
+        """
+        available_vars = ", ".join(f"{{{k}}}" for k in sorted(var_dict.keys()))
+        try:
+            return value.format(**var_dict)
+        except KeyError as e:
+            unknown_var = str(e).strip("'")
+            raise ValueError(
+                f"Unknown variable '{{{unknown_var}}}' in: {value}\n"
+                f"Available variables: {available_vars}"
+            ) from None
+
     def _substitute_args(
         self,
         args: dict[str, str] | list[str],
@@ -201,17 +238,31 @@ class ScriptExecutor:
 
         Returns:
             Arguments with variables substituted
+
+        Raises:
+            ValueError: If an unknown variable is referenced
         """
         var_dict = variables.as_dict()
+        available_vars = ", ".join(f"{{{k}}}" for k in sorted(var_dict.keys()))
+
+        def substitute(value: str) -> str:
+            try:
+                return value.format(**var_dict)
+            except KeyError as e:
+                unknown_var = str(e).strip("'")
+                raise ValueError(
+                    f"Unknown variable '{{{unknown_var}}}' in argument: {value}\n"
+                    f"Available variables: {available_vars}"
+                ) from None
 
         if isinstance(args, dict):
             return {
-                key: value.format(**var_dict) if isinstance(value, str) else value
+                key: substitute(value) if isinstance(value, str) else value
                 for key, value in args.items()
             }
         else:
             return [
-                arg.format(**var_dict) if isinstance(arg, str) else arg
+                substitute(arg) if isinstance(arg, str) else arg
                 for arg in args
             ]
 

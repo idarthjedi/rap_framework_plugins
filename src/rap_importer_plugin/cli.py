@@ -25,6 +25,7 @@ class CLIArgs:
     mode: ExecutionMode
     config_path: Path
     log_level: str | None
+    simulate_paths: tuple[str, ...] | None  # None = not simulating, tuple = simulate mode
 
 
 @click.command()
@@ -63,9 +64,26 @@ class CLIArgs:
     default=None,
     help="Override log level from config",
 )
+@click.option(
+    "--simulate",
+    "simulate",
+    is_flag=True,
+    help="Simulate path filtering and display results table",
+)
+@click.argument(
+    "test_paths",
+    nargs=-1,
+)
 @click.version_option(version="0.1.0", prog_name="rap-importer")
 @click.pass_context
-def cli(ctx: click.Context, mode: str, config_path: Path, log_level: str | None) -> None:
+def cli(
+    ctx: click.Context,
+    mode: str,
+    config_path: Path,
+    log_level: str | None,
+    simulate: bool,
+    test_paths: tuple[str, ...],
+) -> None:
     """File watcher with configurable pipeline for DEVONthink imports.
 
     Examples:
@@ -76,11 +94,14 @@ def cli(ctx: click.Context, mode: str, config_path: Path, log_level: str | None)
       rap-importer --runonce           Process existing files and exit
       rap-importer --config=my.json    Use custom config file
       rap-importer --log-level=DEBUG   Enable debug logging
+      rap-importer --simulate          Show path filtering simulation table
+      rap-importer --simulate "DB/Group/test.pdf"  Test specific paths
     """
     ctx.obj = CLIArgs(
         mode=ExecutionMode(mode),
         config_path=config_path,
         log_level=log_level,
+        simulate_paths=test_paths if simulate else None,
     )
 
 

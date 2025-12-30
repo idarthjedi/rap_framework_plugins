@@ -1,4 +1,4 @@
-# RAP Importer Plugin
+  # RAP Importer Plugin
 
 A Python-based file watcher with configurable pipeline for automatically importing PDFs into DEVONthink with OCR. Files are routed to the correct database and group based on their folder structure.
 
@@ -30,6 +30,7 @@ Drop PDF files into a watched folder structure that mirrors your DEVONthink data
 - **Retry logic**: Failed files are retried up to N times with configurable delays
 - **macOS notifications**: Get notified of errors (and optionally successes)
 - **Flexible logging**: DEBUG/TRACE levels with file rotation
+- **Path filter simulation**: Test how files would be processed without running the pipeline
 
 ## Prerequisites
 
@@ -117,20 +118,61 @@ Process all existing files and exit:
 uv run rap-importer --runonce
 ```
 
+### Simulate Mode
+
+Test how files would be processed by your pipeline configuration without actually running any scripts:
+
+```bash
+uv run rap-importer --simulate
+```
+
+This displays a table showing:
+- Which paths are globally excluded
+- Which scripts would run for each path
+- Why scripts are skipped (no include match vs. excluded by pattern)
+
+You can also test specific paths:
+
+```bash
+uv run rap-importer --simulate "Liberty University/BUSI770/assignment.pdf"
+```
+
+Example output:
+
+```
+╭──────────────────────────────╮
+│ Watcher: RAP Research        │
+│ Global Excludes: */EndNote/* │
+╰──────────────────────────────╯
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━┓
+┃ Test Path                     ┃ Global ┃ Script A ┃ Script B  ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━┩
+│ Liberty University/file.pdf   │   ✓    │  ✓ RUN   │  ✓ RUN    │
+│ Liberty University/EndNote/…  │ ✗ EXCL │    -     │    -      │
+│ Other Database/file.pdf       │   ✓    │  ✗ skip  │  ✗ skip   │
+└───────────────────────────────┴────────┴──────────┴───────────┘
+
+Legend: ✓ RUN = script executes, ✗ excl = excluded, ✗ skip = no include match
+```
+
 ### Command-Line Options
 
 ```
-rap-importer [-h] [--background | --foreground | --runonce] [--config FILE]
-             [--log-level LEVEL] [--version]
+rap-importer [-h] [--background | --foreground | --runonce | --simulate]
+             [--config FILE] [--log-level LEVEL] [--version] [TEST_PATHS...]
 
 Options:
   -h, --help            Show help message
   --background          Run in background, return control to terminal (default)
   --foreground          Run in foreground with console output (for debugging)
   --runonce             Process existing files and exit
+  --simulate            Display path filtering simulation table
   --config, -c FILE     Path to config file (default: config/config.json)
   --log-level, -l LEVEL Override log level (TRACE, DEBUG, INFO, WARNING, ERROR)
   --version, -v         Show version
+
+Arguments:
+  TEST_PATHS            Optional paths to test (used with --simulate)
 ```
 
 ### Stopping the Background Daemon
@@ -259,13 +301,17 @@ The `cwd` field specifies the working directory for command execution. Both `cwd
 
 ### Script Variable Substitution
 
-Scripts can use these variables in their `path` (for command type) and `args`:
-- `{file_path}` - Full POSIX path to the file
-- `{relative_path}` - Path relative to watch folder
-- `{filename}` - Just the filename
-- `{database}` - First path component (database name)
-- `{group_path}` - Path between database and filename
-- `{log_level}` - Current log level (e.g., DEBUG, INFO, WARNING)
+Scripts can use these variables in their `path` (for command type) and `args`. Variables are **watcher-specific** - each watcher uses its own `base_folder` from its configuration.
+
+| Variable | Description | Example Value |
+|----------|-------------|---------------|
+| `{file_path}` | Full POSIX path to the file | `/Users/you/Documents/RAPPlatform-Import/Liberty.University/BUSI770/file.pdf` |
+| `{relative_path}` | Path relative to watch folder | `Liberty.University/BUSI770/file.pdf` |
+| `{filename}` | Just the filename | `file.pdf` |
+| `{database}` | First path component (database name) | `Liberty.University` |
+| `{group_path}` | Path between database and filename | `BUSI770` |
+| `{base_folder}` | Watch folder base path | `/Users/you/Documents/RAPPlatform-Import` |
+| `{log_level}` | Current log level | `INFO` |
 
 ### Script Configuration Fields
 
@@ -424,6 +470,7 @@ rap_importer_plugin/
 │   ├── menubar.py             # macOS menu bar app
 │   ├── notifications.py       # macOS notifications
 │   ├── pipeline.py            # Pipeline management
+│   ├── simulate.py            # Path filter simulation
 │   └── watcher.py             # File watching
 ├── scripts/
 │   ├── devonthink_importer.applescript  # Source
