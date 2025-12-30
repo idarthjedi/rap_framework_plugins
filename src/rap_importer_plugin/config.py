@@ -100,6 +100,7 @@ class WatcherConfig:
     name: str
     watch: WatchConfig
     pipeline: PipelineConfig
+    global_exclude_paths: list[str] = field(default_factory=list)  # fnmatch patterns to skip globally
     enabled: bool = True
 
 
@@ -202,6 +203,7 @@ def _parse_watcher_config(data: dict[str, Any]) -> WatcherConfig:
         name=data["name"],
         watch=_parse_watch_config(data["watch"]),
         pipeline=_parse_pipeline_config(data["pipeline"]),
+        global_exclude_paths=data.get("global_exclude_paths", []),
         enabled=data.get("enabled", True),
     )
 

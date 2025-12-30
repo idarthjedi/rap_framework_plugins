@@ -26,6 +26,7 @@ class PipelineManager:
         pipeline_config: PipelineConfig,
         watch_config: WatchConfig,
         executor: ScriptExecutor,
+        global_exclude_paths: list[str] | None = None,
         on_success: Callable[[], None] | None = None,
         log_level: str = "INFO",
     ) -> None:
@@ -35,12 +36,14 @@ class PipelineManager:
             pipeline_config: Pipeline configuration
             watch_config: Watch configuration (for base folder)
             executor: Script executor instance
+            global_exclude_paths: Patterns to exclude globally (all scripts and deletion)
             on_success: Optional callback when file is successfully processed
             log_level: Current log level (for variable substitution in scripts)
         """
         self.config = pipeline_config
         self.watch_config = watch_config
         self.executor = executor
+        self.global_exclude_paths = global_exclude_paths or []
         self.on_success = on_success
         self.log_level = log_level
 
@@ -98,6 +101,23 @@ class PipelineManager:
         )
         return False
 
+    def _is_globally_excluded(self, relative_path: str) -> bool:
+        """Check if file matches any global exclude patterns.
+
+        Args:
+            relative_path: File path relative to watch folder
+
+        Returns:
+            True if file should be excluded globally
+        """
+        for pattern in self.global_exclude_paths:
+            if fnmatch.fnmatch(relative_path, pattern):
+                logger.debug(
+                    f"File excluded by global pattern '{pattern}': {relative_path}"
+                )
+                return True
+        return False
+
     def process_file(self, file_path: Path) -> bool:
         """Run all scripts in pipeline for a file.
 
@@ -119,10 +139,20 @@ class PipelineManager:
             logger.warning(f"File no longer exists: {file_path}")
             return False
 
+        # Compute relative path for filtering checks
+        base_folder = self.watch_config.expanded_base_folder
+        try:
+            relative_path = str(file_path.relative_to(base_folder))
+        except ValueError:
+            relative_path = file_path.name
+
+        # Check global exclude patterns (before any processing)
+        if self._is_globally_excluded(relative_path):
+            return False  # Silent skip, already logged at DEBUG
+
         logger.info(f"Processing: {file_path.name}")
 
         # Create variables for substitution
-        base_folder = self.watch_config.expanded_base_folder
         variables = FileVariables.from_file(file_path, base_folder, self.log_level)
 
         logger.debug(

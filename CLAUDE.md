@@ -174,6 +174,26 @@ Common patterns:
 - `*/Archive/*` - Match Archive folder at any depth
 - `*/Week0?/*` - Match Week01-Week09 using `?` single-character wildcard
 
+### Global Exclude Paths
+
+At the watcher level, `global_exclude_paths` can exclude folders from ALL processing:
+
+```json
+{
+  "name": "RAP Research",
+  "global_exclude_paths": ["*/EndNote/*", "*/Staging/*"],
+  "watch": { ... },
+  "pipeline": { ... }
+}
+```
+
+Files matching these patterns:
+- Are silently skipped (DEBUG log only)
+- Never trigger any scripts
+- Are never deleted (even if `delete_on_success=true`)
+
+**Use case:** Staging folders where files are copied for other processes to handle via their own pipelines.
+
 ### Config Schema
 
 The config structure is defined in `config/config.schema.json` (JSON Schema Draft 7). This enables:

@@ -239,3 +239,59 @@ class TestShouldRunScript:
             script, "DB/Course/Unit1/Assignments/file.pdf"
         ) is True
         assert pm._should_run_script(script, "DB/Course/Unit1/Reading/file.pdf") is False
+
+
+class TestGlobalExcludePaths:
+    """Tests for _is_globally_excluded path filtering."""
+
+    def test_no_global_excludes_allows_all(
+        self, mock_executor: MagicMock, watch_config: WatchConfig
+    ) -> None:
+        """No global excludes should allow all files."""
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+        # Explicitly set empty global excludes
+        pm.global_exclude_paths = []
+
+        assert pm._is_globally_excluded("any/path/file.pdf") is False
+        assert pm._is_globally_excluded("Liberty/EndNote/file.pdf") is False
+
+    def test_global_exclude_pattern_matches(
+        self, mock_executor: MagicMock, watch_config: WatchConfig
+    ) -> None:
+        """Global exclude pattern should match and exclude files."""
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+        pm.global_exclude_paths = ["*/EndNote/*"]
+
+        assert pm._is_globally_excluded("Liberty/EndNote/file.pdf") is True
+        assert pm._is_globally_excluded("Liberty/EndNote/Sub/file.pdf") is True
+
+    def test_global_exclude_pattern_no_match(
+        self, mock_executor: MagicMock, watch_config: WatchConfig
+    ) -> None:
+        """Non-matching paths should not be excluded."""
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+        pm.global_exclude_paths = ["*/EndNote/*"]
+
+        assert pm._is_globally_excluded("Liberty/BUSI770/file.pdf") is False
+        assert pm._is_globally_excluded("Liberty/Course/Week01/file.pdf") is False
+
+    def test_global_exclude_multiple_patterns(
+        self, mock_executor: MagicMock, watch_config: WatchConfig
+    ) -> None:
+        """Any matching global exclude pattern should exclude."""
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+        pm.global_exclude_paths = ["*/EndNote/*", "*/Staging/*"]
+
+        assert pm._is_globally_excluded("Liberty/EndNote/file.pdf") is True
+        assert pm._is_globally_excluded("Liberty/Staging/file.pdf") is True
+        assert pm._is_globally_excluded("Liberty/BUSI770/file.pdf") is False
+
+    def test_global_exclude_with_database_pattern(
+        self, mock_executor: MagicMock, watch_config: WatchConfig
+    ) -> None:
+        """Database-level patterns should work."""
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+        pm.global_exclude_paths = ["Temp*/*"]
+
+        assert pm._is_globally_excluded("TempFiles/import/file.pdf") is True
+        assert pm._is_globally_excluded("Liberty/Course/file.pdf") is False

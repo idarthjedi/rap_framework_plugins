@@ -141,31 +141,38 @@ Use one of these methods to stop the running daemon:
 
 ## Configuration
 
-Configuration is stored in `config/config.json`:
+Configuration is stored in `config/config.json`. The config supports multiple watchers, each with their own watch folder and pipeline:
 
 ```json
 {
-  "watch": {
-    "base_folder": "~/Documents/RAPPlatform-Import",
-    "file_patterns": ["*.pdf"],
-    "ignore_patterns": ["*.download", "*.crdownload", "*.tmp"],
-    "stability_check_seconds": 1.0,
-    "stability_timeout_seconds": 60
-  },
-  "pipeline": {
-    "retry_count": 3,
-    "retry_delay_seconds": 5,
-    "delete_on_success": true,
-    "scripts": [
-      {
-        "name": "DEVONthink Import",
-        "type": "applescript",
-        "path": "scripts/devonthink_importer.scpt",
-        "enabled": true,
-        "args": ["{file_path}", "{relative_path}"]
+  "watchers": [
+    {
+      "name": "RAP Research",
+      "enabled": true,
+      "global_exclude_paths": ["*/EndNote/*", "*/Staging/*"],
+      "watch": {
+        "base_folder": "~/Documents/RAPPlatform-Import",
+        "file_patterns": ["*.pdf"],
+        "ignore_patterns": ["*.download", "*.crdownload", "*.tmp"],
+        "stability_check_seconds": 1.0,
+        "stability_timeout_seconds": 60
+      },
+      "pipeline": {
+        "retry_count": 3,
+        "retry_delay_seconds": 5,
+        "delete_on_success": true,
+        "scripts": [
+          {
+            "name": "DEVONthink Import",
+            "type": "applescript",
+            "path": "scripts/devonthink_importer.scpt",
+            "enabled": true,
+            "args": ["{file_path}", "{relative_path}"]
+          }
+        ]
       }
-    ]
-  },
+    }
+  ],
   "logging": {
     "level": "INFO",
     "file": "~/Library/Logs/rap-importer.log",
@@ -182,21 +189,46 @@ Configuration is stored in `config/config.json`:
 
 ### Configuration Options
 
-| Section | Option | Default | Description |
-|---------|--------|---------|-------------|
-| watch | base_folder | ~/Documents/RAPPlatform-Import | Folder to watch |
-| watch | file_patterns | ["*.pdf"] | File patterns to process |
-| watch | ignore_patterns | ["*.download", ...] | Patterns to ignore |
-| watch | stability_check_seconds | 1.0 | Delay between size checks |
-| watch | stability_timeout_seconds | 60 | Max time to wait for stable file |
-| pipeline | retry_count | 3 | Max retries for failed files |
-| pipeline | retry_delay_seconds | 5 | Delay between retries |
-| pipeline | delete_on_success | true | Delete source file after success |
-| logging | level | INFO | Log level (TRACE/DEBUG/INFO/WARNING/ERROR) |
-| logging | file | ~/Library/Logs/rap-importer.log | Log file path |
-| notifications | enabled | true | Enable macOS notifications |
-| notifications | on_error | true | Notify on errors |
-| notifications | on_success | false | Notify on success |
+#### Watcher Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| name | (required) | Display name for this watcher |
+| enabled | true | Whether this watcher is active |
+| global_exclude_paths | [] | Patterns to skip globally (all scripts and deletion) |
+
+#### Watch Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| base_folder | (required) | Folder to watch |
+| file_patterns | ["*.pdf"] | File patterns to process |
+| ignore_patterns | ["*.download", ...] | Patterns to ignore |
+| stability_check_seconds | 1.0 | Delay between size checks |
+| stability_timeout_seconds | 60 | Max time to wait for stable file |
+
+#### Pipeline Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| retry_count | 3 | Max retries for failed files |
+| retry_delay_seconds | 5 | Delay between retries |
+| delete_on_success | true | Delete source file after success |
+
+#### Logging Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| level | INFO | Log level (TRACE/DEBUG/INFO/WARNING/ERROR) |
+| file | ~/Library/Logs/rap-importer.log | Log file path |
+
+#### Notification Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| enabled | true | Enable macOS notifications |
+| on_error | true | Notify on errors |
+| on_success | false | Notify on success |
 
 ### Script Types
 
@@ -240,11 +272,54 @@ Scripts can use these variables in their `path` (for command type) and `args`:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | Yes | Human-readable script name |
+| `reqs` | string | No | Requirements/dependencies description |
 | `type` | string | Yes | `applescript`, `python`, or `command` |
 | `path` | string | Yes | Script path or command string |
 | `enabled` | boolean | No | Whether to run (default: true) |
 | `args` | list/dict | No | Additional arguments |
 | `cwd` | string | No | Working directory (for command type) |
+| `include_paths` | list | No | Run only on files matching these patterns |
+| `exclude_paths` | list | No | Skip files matching these patterns (takes precedence) |
+
+### Path Filtering
+
+Scripts can be configured to run only on specific folders using `include_paths` and `exclude_paths`. Patterns use `fnmatch` glob syntax and match against `relative_path`.
+
+**Filtering logic:**
+1. No filters (both empty) → script runs on all files
+2. **Exclude patterns checked first** → if any match, script is skipped
+3. **Include patterns checked second** → at least one must match
+
+**Example:** Run only on BUSI courses, excluding Archive folders:
+```json
+{
+  "name": "Scholarly Assessment",
+  "type": "command",
+  "path": "uv run rap scholarly_assessment",
+  "include_paths": ["*/BUSI*/*"],
+  "exclude_paths": ["*/Archive/*"]
+}
+```
+
+### Global Exclude Paths
+
+At the watcher level, `global_exclude_paths` excludes folders from ALL processing:
+
+```json
+{
+  "name": "RAP Research",
+  "global_exclude_paths": ["*/EndNote/*", "*/Staging/*"],
+  "watch": { ... },
+  "pipeline": { ... }
+}
+```
+
+Files matching these patterns:
+- Are silently skipped (DEBUG log only)
+- Never trigger any scripts
+- Are never deleted (even if `delete_on_success=true`)
+
+**Use case:** Staging folders where files are copied for other processes to handle via their own pipelines.
 
 ## Folder Structure Reference
 

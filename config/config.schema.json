@@ -36,6 +36,12 @@
           "description": "Whether this watcher is active",
           "default": true
         },
+        "global_exclude_paths": {
+          "type": "array",
+          "description": "fnmatch patterns - skip files globally (all scripts and deletion)",
+          "items": { "type": "string" },
+          "default": []
+        },
         "watch": {
           "$ref": "#/$defs/WatchConfig"
         },

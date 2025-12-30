@@ -3,6 +3,7 @@
     {
       "name": "RAP Research",
       "enabled": true,
+      "global_exclude_paths": ["*/EndNote/*"],
       "watch": {
         "base_folder": "~/Documents/RAPPlatform-Import",
         "file_patterns": ["*.pdf"],
@@ -23,7 +24,7 @@
             "enabled": true,
             "args": ["{file_path}", "~/Documents/RAPPlatform-Import/EndNote/{filename}"],
             "include_paths": ["Liberty University/*"],
-            "exclude_paths": ["Liberty University/Artificial Intelligence/*"]
+            "exclude_paths": ["Liberty University/Artificial Intelligence/*", "Liberty University/Harvard Business Review/*"]
           },
           {
             "name": "DEVONthink Import",

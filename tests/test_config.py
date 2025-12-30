@@ -205,6 +205,25 @@ class TestWatcherConfig:
         )
         assert config.enabled is False
 
+    def test_global_exclude_paths_default_empty(self) -> None:
+        """global_exclude_paths should default to empty list."""
+        config = WatcherConfig(
+            name="test",
+            watch=WatchConfig(base_folder="~/test"),
+            pipeline=PipelineConfig(scripts=[]),
+        )
+        assert config.global_exclude_paths == []
+
+    def test_global_exclude_paths_with_patterns(self) -> None:
+        """Should accept global_exclude_paths patterns."""
+        config = WatcherConfig(
+            name="test",
+            watch=WatchConfig(base_folder="~/test"),
+            pipeline=PipelineConfig(scripts=[]),
+            global_exclude_paths=["*/EndNote/*", "*/Staging/*"],
+        )
+        assert config.global_exclude_paths == ["*/EndNote/*", "*/Staging/*"]
+
 
 class TestConfigWithWatchers:
     """Tests for Config with watchers array."""
@@ -353,6 +372,24 @@ class TestLoadConfig:
         script = config.watchers[0].pipeline.scripts[0]
         assert script.include_paths == ["BUSI*/*", "DISS*/*"]
         assert script.exclude_paths == ["*/Archive/*"]
+
+    def test_load_config_with_global_excludes(self, tmp_path: Path) -> None:
+        """Should load config with global_exclude_paths."""
+        config_data = {
+            "watchers": [
+                {
+                    "name": "Test Watcher",
+                    "global_exclude_paths": ["*/EndNote/*", "*/Staging/*"],
+                    "watch": {"base_folder": "~/test"},
+                    "pipeline": {"scripts": []}
+                }
+            ]
+        }
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps(config_data))
+
+        config = load_config(config_path)
+        assert config.watchers[0].global_exclude_paths == ["*/EndNote/*", "*/Staging/*"]
 
     def test_missing_file_raises(self, tmp_path: Path) -> None:
         """Should raise FileNotFoundError for missing file."""

@@ -227,6 +227,7 @@ def main() -> int:
             pipeline_config=watcher_config.pipeline,
             watch_config=watcher_config.watch,
             executor=executor,
+            global_exclude_paths=watcher_config.global_exclude_paths,
             log_level=config.logging.level,
         )
 
