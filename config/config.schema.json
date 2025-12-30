@@ -108,11 +108,6 @@
           "description": "Seconds to wait between retries",
           "default": 5.0,
           "minimum": 0
-        },
-        "delete_on_success": {
-          "type": "boolean",
-          "description": "Delete original file after successful processing",
-          "default": true
         }
       }
     },

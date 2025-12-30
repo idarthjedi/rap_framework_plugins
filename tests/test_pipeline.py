@@ -1,7 +1,8 @@
-"""Tests for pipeline path filtering."""
+"""Tests for pipeline path filtering and archiving."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -295,3 +296,185 @@ class TestGlobalExcludePaths:
 
         assert pm._is_globally_excluded("TempFiles/import/file.pdf") is True
         assert pm._is_globally_excluded("Liberty/Course/file.pdf") is False
+
+
+class TestArchivedFolderAutoExclude:
+    """Tests for automatic _Archived folder exclusion."""
+
+    def test_archived_folder_auto_excluded(
+        self, mock_executor: MagicMock, watch_config: WatchConfig
+    ) -> None:
+        """_Archived folder should be automatically added to global excludes."""
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+
+        assert "_Archived/*" in pm.global_exclude_paths
+
+    def test_archived_folder_excluded_with_other_patterns(
+        self, mock_executor: MagicMock, watch_config: WatchConfig
+    ) -> None:
+        """_Archived should be added alongside user-defined patterns."""
+        pipeline_config = PipelineConfig(scripts=[])
+        pm = PipelineManager(
+            pipeline_config=pipeline_config,
+            watch_config=watch_config,
+            executor=mock_executor,
+            global_exclude_paths=["*/EndNote/*"],
+        )
+
+        assert "_Archived/*" in pm.global_exclude_paths
+        assert "*/EndNote/*" in pm.global_exclude_paths
+
+    def test_archived_folder_not_duplicated(
+        self, mock_executor: MagicMock, watch_config: WatchConfig
+    ) -> None:
+        """_Archived should not be added if already present."""
+        pipeline_config = PipelineConfig(scripts=[])
+        pm = PipelineManager(
+            pipeline_config=pipeline_config,
+            watch_config=watch_config,
+            executor=mock_executor,
+            global_exclude_paths=["_Archived/*", "*/Other/*"],
+        )
+
+        # Count occurrences
+        count = pm.global_exclude_paths.count("_Archived/*")
+        assert count == 1
+
+
+class TestArchiveFile:
+    """Tests for file archiving functionality."""
+
+    def test_get_unique_archive_path_no_collision(
+        self, tmp_path: Path, mock_executor: MagicMock
+    ) -> None:
+        """Should return original path when no collision exists."""
+        watch_config = WatchConfig(base_folder=str(tmp_path))
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+
+        archive_dir = tmp_path / "_Archived" / "Database"
+        archive_dir.mkdir(parents=True)
+
+        result = pm._get_unique_archive_path(archive_dir, "document.pdf")
+
+        assert result == archive_dir / "document.pdf"
+
+    def test_get_unique_archive_path_with_collision(
+        self, tmp_path: Path, mock_executor: MagicMock
+    ) -> None:
+        """Should append -000 suffix when file exists."""
+        watch_config = WatchConfig(base_folder=str(tmp_path))
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+
+        archive_dir = tmp_path / "_Archived" / "Database"
+        archive_dir.mkdir(parents=True)
+
+        # Create existing file
+        existing = archive_dir / "document.pdf"
+        existing.write_text("existing")
+
+        result = pm._get_unique_archive_path(archive_dir, "document.pdf")
+
+        assert result == archive_dir / "document-000.pdf"
+
+    def test_get_unique_archive_path_increments_suffix(
+        self, tmp_path: Path, mock_executor: MagicMock
+    ) -> None:
+        """Should increment suffix when multiple collisions exist."""
+        watch_config = WatchConfig(base_folder=str(tmp_path))
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+
+        archive_dir = tmp_path / "_Archived" / "Database"
+        archive_dir.mkdir(parents=True)
+
+        # Create existing files (suffix starts at -000)
+        (archive_dir / "document.pdf").write_text("original")
+        (archive_dir / "document-000.pdf").write_text("first copy")
+        (archive_dir / "document-001.pdf").write_text("second copy")
+
+        result = pm._get_unique_archive_path(archive_dir, "document.pdf")
+
+        assert result == archive_dir / "document-002.pdf"
+
+    def test_get_unique_archive_path_preserves_extension(
+        self, tmp_path: Path, mock_executor: MagicMock
+    ) -> None:
+        """Suffix should go before extension."""
+        watch_config = WatchConfig(base_folder=str(tmp_path))
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+
+        archive_dir = tmp_path / "_Archived" / "Database"
+        archive_dir.mkdir(parents=True)
+
+        # Create existing file
+        (archive_dir / "report.docx").write_text("existing")
+
+        result = pm._get_unique_archive_path(archive_dir, "report.docx")
+
+        assert result == archive_dir / "report-000.docx"
+        assert result.suffix == ".docx"
+
+    def test_archive_file_creates_directory(
+        self, tmp_path: Path, mock_executor: MagicMock
+    ) -> None:
+        """Archive should create necessary directories."""
+        watch_config = WatchConfig(base_folder=str(tmp_path))
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+
+        # Create source file
+        source_dir = tmp_path / "Database" / "Course"
+        source_dir.mkdir(parents=True)
+        source_file = source_dir / "document.pdf"
+        source_file.write_text("content")
+
+        pm._archive_file(source_file)
+
+        # Check archive directory was created
+        archive_dir = tmp_path / "_Archived" / "Database" / "Course"
+        assert archive_dir.exists()
+        assert (archive_dir / "document.pdf").exists()
+
+    def test_archive_file_preserves_relative_path(
+        self, tmp_path: Path, mock_executor: MagicMock
+    ) -> None:
+        """Archived files should preserve folder structure."""
+        watch_config = WatchConfig(base_folder=str(tmp_path))
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+
+        # Create deeply nested source
+        source_dir = tmp_path / "Liberty" / "BUSI770" / "Week01"
+        source_dir.mkdir(parents=True)
+        source_file = source_dir / "assignment.pdf"
+        source_file.write_text("content")
+
+        pm._archive_file(source_file)
+
+        # Check file is in correct location
+        archived = tmp_path / "_Archived" / "Liberty" / "BUSI770" / "Week01" / "assignment.pdf"
+        assert archived.exists()
+        assert not source_file.exists()  # Original should be moved
+
+    def test_archive_file_handles_collision(
+        self, tmp_path: Path, mock_executor: MagicMock
+    ) -> None:
+        """Should handle collision when archiving same filename twice."""
+        watch_config = WatchConfig(base_folder=str(tmp_path))
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+
+        source_dir = tmp_path / "Database"
+        source_dir.mkdir(parents=True)
+
+        # First file
+        file1 = source_dir / "document.pdf"
+        file1.write_text("first content")
+        pm._archive_file(file1)
+
+        # Second file with same name
+        file2 = source_dir / "document.pdf"
+        file2.write_text("second content")
+        pm._archive_file(file2)
+
+        archive_dir = tmp_path / "_Archived" / "Database"
+        assert (archive_dir / "document.pdf").exists()
+        assert (archive_dir / "document-000.pdf").exists()  # Suffix starts at -000
+        assert (archive_dir / "document.pdf").read_text() == "first content"
+        assert (archive_dir / "document-000.pdf").read_text() == "second content"

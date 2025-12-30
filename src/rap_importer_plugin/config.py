@@ -58,7 +58,6 @@ class PipelineConfig:
     scripts: list[ScriptConfig]
     retry_count: int = 3
     retry_delay_seconds: float = 5.0
-    delete_on_success: bool = True
 
     @property
     def enabled_scripts(self) -> list[ScriptConfig]:
@@ -153,7 +152,6 @@ def _parse_pipeline_config(data: dict[str, Any]) -> PipelineConfig:
         scripts=scripts,
         retry_count=data.get("retry_count", 3),
         retry_delay_seconds=data.get("retry_delay_seconds", 5.0),
-        delete_on_success=data.get("delete_on_success", True),
     )
 
 

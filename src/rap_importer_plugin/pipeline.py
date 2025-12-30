@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
-import os
+import shutil
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -43,9 +43,13 @@ class PipelineManager:
         self.config = pipeline_config
         self.watch_config = watch_config
         self.executor = executor
-        self.global_exclude_paths = global_exclude_paths or []
         self.on_success = on_success
         self.log_level = log_level
+
+        # Set up global exclude paths, always including _Archived folder
+        self.global_exclude_paths = list(global_exclude_paths or [])
+        if "_Archived/*" not in self.global_exclude_paths:
+            self.global_exclude_paths.append("_Archived/*")
 
         # Track failed files and their retry counts
         self._failed_files: dict[str, int] = {}
@@ -206,9 +210,8 @@ class PipelineManager:
         # All scripts succeeded
         logger.info(f"Pipeline complete for: {file_path.name}")
 
-        # Delete original file if configured
-        if self.config.delete_on_success:
-            self._delete_file(file_path)
+        # Archive the original file
+        self._archive_file(file_path)
 
         # Clear any failure tracking
         self._failed_files.pop(file_key, None)
@@ -257,34 +260,61 @@ class PipelineManager:
                 f"Max retries exceeded for file. Check logs for details.",
             )
 
-    def _delete_file(self, file_path: Path) -> None:
-        """Delete the original file after successful processing.
+    def _archive_file(self, file_path: Path) -> None:
+        """Archive file to _Archived folder after successful processing.
 
         Args:
-            file_path: Path to the file
+            file_path: Path to the file to archive
         """
-        try:
-            # Move to trash using Finder (safer than rm)
-            import subprocess
+        base_folder = self.watch_config.expanded_base_folder
 
-            subprocess.run(
-                [
-                    "osascript",
-                    "-e",
-                    f'tell application "Finder" to delete POSIX file "{file_path}"',
-                ],
-                capture_output=True,
-                check=True,
-            )
-            logger.debug(f"Moved to trash: {file_path}")
-        except subprocess.CalledProcessError as e:
-            # Fall back to os.remove
-            logger.debug(f"Finder delete failed, using os.remove: {e}")
-            try:
-                os.remove(file_path)
-                logger.debug(f"Deleted: {file_path}")
-            except OSError as e:
-                logger.warning(f"Failed to delete file: {e}")
+        try:
+            # Calculate archive path preserving folder structure
+            relative = file_path.relative_to(base_folder)
+            archive_dir = base_folder / "_Archived" / relative.parent
+            archive_dir.mkdir(parents=True, exist_ok=True)
+
+            # Handle name collisions
+            dest_path = self._get_unique_archive_path(archive_dir, file_path.name)
+
+            # Move file to archive
+            shutil.move(str(file_path), str(dest_path))
+            logger.debug(f"Archived: {file_path} -> {dest_path}")
+
+        except ValueError:
+            # File not under base_folder - shouldn't happen but handle gracefully
+            logger.warning(f"Cannot archive file outside base folder: {file_path}")
+        except OSError as e:
+            logger.warning(f"Failed to archive file: {e}")
+
+    def _get_unique_archive_path(self, archive_dir: Path, filename: str) -> Path:
+        """Get unique path in archive, appending suffix if needed.
+
+        Args:
+            archive_dir: Target archive directory
+            filename: Original filename
+
+        Returns:
+            Unique path for the archived file
+
+        Raises:
+            RuntimeError: If all suffixes -000 to -999 are exhausted
+        """
+        dest = archive_dir / filename
+        if not dest.exists():
+            return dest
+
+        # Split filename and extension
+        stem = dest.stem
+        suffix = dest.suffix
+
+        for i in range(1000):
+            new_name = f"{stem}-{i:03d}{suffix}"
+            dest = archive_dir / new_name
+            if not dest.exists():
+                return dest
+
+        raise RuntimeError(f"Archive suffix exhausted for {filename} (max -999)")
 
     def reset_failures(self) -> None:
         """Clear failed files tracking (call on restart)."""

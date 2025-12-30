@@ -22,6 +22,7 @@ Drop PDF files into a watched folder structure that mirrors your DEVONthink data
 - **Python-based file watching** using watchdog for reliable, event-driven monitoring
 - **Configurable pipeline** with support for AppleScript and Python scripts
 - **Duplicate detection**: SHA-1 hash-based detection prevents importing the same file twice
+- **Automatic archiving**: Processed files are moved to `_Archived/` folder (not deleted)
 - **Three execution modes**:
   - `--background` (default): Spawn daemon, return to terminal
   - `--foreground`: Run in terminal with console output (for debugging)
@@ -255,7 +256,8 @@ Configuration is stored in `config/config.json`. The config supports multiple wa
 |--------|---------|-------------|
 | retry_count | 3 | Max retries for failed files |
 | retry_delay_seconds | 5 | Delay between retries |
-| delete_on_success | true | Delete source file after success |
+
+**Note:** Successfully processed files are automatically archived to `{base_folder}/_Archived/` preserving folder structure. The `_Archived` folder is automatically excluded from processing.
 
 #### Logging Options
 
@@ -382,7 +384,7 @@ Files matching these patterns:
 - **Database must exist**: If the database doesn't exist in DEVONthink, the file fails with error
 - **Groups auto-created**: Non-Inbox groups are created automatically
 - **Smart rules triggered**: After OCR, smart rules with "OCR event" trigger are executed
-- **Original deleted**: Successfully imported files are moved to Trash (configurable)
+- **Original archived**: Successfully imported files are moved to `_Archived/` folder (preserving path structure)
 
 ## Duplicate Detection
 
