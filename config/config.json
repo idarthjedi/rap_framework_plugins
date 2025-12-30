@@ -21,7 +21,9 @@
             "type": "command",
             "path": "cp",
             "enabled": true,
-            "args": ["{file_path}", "~/Documents/RAPPlatform-Import-EndNote/{filename}"]
+            "args": ["{file_path}", "~/Documents/RAPPlatform-Import/EndNote/{filename}"],
+            "include_paths": ["Liberty University/*"],
+            "exclude_paths": ["Liberty University/Artificial Intelligence/*"]
           },
           {
             "name": "DEVONthink Import",
@@ -29,7 +31,8 @@
             "type": "applescript",
             "path": "scripts/devonthink_importer.scpt",
             "enabled": true,
-            "args": ["{file_path}", "{relative_path}"]
+            "args": ["{file_path}", "{relative_path}"],
+            "include_paths": ["Liberty University/*"]
           },
           {
             "name": "Scholarly Assessment",
@@ -38,7 +41,9 @@
             "path": "uv run rap scholarly_assessment",
             "enabled": true,
             "cwd": "~/development/anthropics/projects/research_analysis_platform",
-            "args": ["{file_path}", "--headless", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/", "--log-level={log_level}"]
+            "args": ["{file_path}", "--headless", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/", "--log-level={log_level}"],
+            "include_paths": ["Liberty University/*"],
+            "exclude_paths": ["Liberty University/Harvard Business Review/*"]
           }
         ]
       }

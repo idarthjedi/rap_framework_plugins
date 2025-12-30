@@ -38,6 +38,8 @@ class ScriptConfig:
     enabled: bool = True
     args: dict[str, str] | list[str] = field(default_factory=dict)
     cwd: str | None = None  # Optional working directory (supports ~ expansion)
+    include_paths: list[str] = field(default_factory=list)  # fnmatch patterns to include
+    exclude_paths: list[str] = field(default_factory=list)  # fnmatch patterns to exclude
 
     def __post_init__(self) -> None:
         if self.type not in ("applescript", "python", "command"):
@@ -136,6 +138,8 @@ def _parse_script_config(data: dict[str, Any]) -> ScriptConfig:
         enabled=data.get("enabled", True),
         args=data.get("args", {}),
         cwd=data.get("cwd"),
+        include_paths=data.get("include_paths", []),
+        exclude_paths=data.get("exclude_paths", []),
     )
 
 

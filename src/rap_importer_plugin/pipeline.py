@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import time
 from pathlib import Path
@@ -12,7 +13,7 @@ from .logging_config import get_logger
 from .notifications import notify_error, notify_success
 
 if TYPE_CHECKING:
-    from .config import PipelineConfig, WatchConfig
+    from .config import PipelineConfig, ScriptConfig, WatchConfig
 
 logger = get_logger("pipeline")
 
@@ -52,6 +53,51 @@ class PipelineManager:
         """Number of files successfully processed."""
         return self._files_processed
 
+    def _should_run_script(self, script: ScriptConfig, relative_path: str) -> bool:
+        """Check if script should run based on path filters.
+
+        Filtering logic:
+        - No filters (both lists empty): script runs on all files
+        - Exclude patterns checked first: if any match, script is skipped
+        - Include patterns: if specified, at least one must match
+
+        Args:
+            script: Script configuration with include/exclude patterns
+            relative_path: File path relative to watch folder (e.g., "DB/Group/file.pdf")
+
+        Returns:
+            True if script should run for this file
+        """
+        # No filters = run on all files (backward compatible)
+        if not script.include_paths and not script.exclude_paths:
+            return True
+
+        # Check exclude patterns first (exclude takes precedence)
+        for pattern in script.exclude_paths:
+            if fnmatch.fnmatch(relative_path, pattern):
+                logger.debug(
+                    f"Script '{script.name}' excluded by pattern '{pattern}': {relative_path}"
+                )
+                return False
+
+        # If no include patterns, run on all non-excluded files
+        if not script.include_paths:
+            return True
+
+        # Check include patterns - must match at least one
+        for pattern in script.include_paths:
+            if fnmatch.fnmatch(relative_path, pattern):
+                logger.debug(
+                    f"Script '{script.name}' included by pattern '{pattern}': {relative_path}"
+                )
+                return True
+
+        # Didn't match any include pattern
+        logger.debug(
+            f"Script '{script.name}' skipped (no include pattern matched): {relative_path}"
+        )
+        return False
+
     def process_file(self, file_path: Path) -> bool:
         """Run all scripts in pipeline for a file.
 
@@ -84,10 +130,15 @@ class PipelineManager:
             f"group_path={variables.group_path}, filename={variables.filename}"
         )
 
-        # Run enabled scripts in order
-        scripts = self.config.enabled_scripts
+        # Filter scripts by enabled status and path filters
+        scripts = [
+            s for s in self.config.enabled_scripts
+            if self._should_run_script(s, variables.relative_path)
+        ]
+
         if not scripts:
-            logger.warning("No enabled scripts in pipeline")
+            # No scripts matched - leave file in place for manual review
+            logger.info(f"No scripts matched path filters: {variables.relative_path}")
             return False
 
         for i, script in enumerate(scripts, 1):

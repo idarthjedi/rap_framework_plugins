@@ -94,6 +94,48 @@ class TestScriptConfig:
             )
             assert config.cwd == "/some/path"
 
+    def test_include_paths_default_empty(self) -> None:
+        """include_paths should default to empty list."""
+        config = ScriptConfig(name="test", type="python", path="test.py")
+        assert config.include_paths == []
+
+    def test_exclude_paths_default_empty(self) -> None:
+        """exclude_paths should default to empty list."""
+        config = ScriptConfig(name="test", type="python", path="test.py")
+        assert config.exclude_paths == []
+
+    def test_include_paths_with_patterns(self) -> None:
+        """Should accept include_paths patterns."""
+        config = ScriptConfig(
+            name="test",
+            type="python",
+            path="test.py",
+            include_paths=["BUSI*/*", "DISS*/*"]
+        )
+        assert config.include_paths == ["BUSI*/*", "DISS*/*"]
+
+    def test_exclude_paths_with_patterns(self) -> None:
+        """Should accept exclude_paths patterns."""
+        config = ScriptConfig(
+            name="test",
+            type="python",
+            path="test.py",
+            exclude_paths=["*/Archive/*", "*/Drafts/*"]
+        )
+        assert config.exclude_paths == ["*/Archive/*", "*/Drafts/*"]
+
+    def test_include_and_exclude_paths_together(self) -> None:
+        """Should accept both include and exclude patterns."""
+        config = ScriptConfig(
+            name="test",
+            type="python",
+            path="test.py",
+            include_paths=["BUSI*/*"],
+            exclude_paths=["*/Draft/*"]
+        )
+        assert config.include_paths == ["BUSI*/*"]
+        assert config.exclude_paths == ["*/Draft/*"]
+
 
 class TestPipelineConfig:
     """Tests for PipelineConfig."""
@@ -282,6 +324,35 @@ class TestLoadConfig:
         assert script.type == "command"
         assert script.cwd == "~/projects/rap"
         assert "{filename}" in script.path
+
+    def test_load_config_with_path_filters(self, tmp_path: Path) -> None:
+        """Should load config with include/exclude path filters."""
+        config_data = {
+            "watchers": [
+                {
+                    "name": "Test Watcher",
+                    "watch": {"base_folder": "~/test"},
+                    "pipeline": {
+                        "scripts": [
+                            {
+                                "name": "Filtered Script",
+                                "type": "python",
+                                "path": "test.py",
+                                "include_paths": ["BUSI*/*", "DISS*/*"],
+                                "exclude_paths": ["*/Archive/*"]
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps(config_data))
+
+        config = load_config(config_path)
+        script = config.watchers[0].pipeline.scripts[0]
+        assert script.include_paths == ["BUSI*/*", "DISS*/*"]
+        assert script.exclude_paths == ["*/Archive/*"]
 
     def test_missing_file_raises(self, tmp_path: Path) -> None:
         """Should raise FileNotFoundError for missing file."""

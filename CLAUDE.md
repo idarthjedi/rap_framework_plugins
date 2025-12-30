@@ -119,6 +119,8 @@ Script configuration fields:
 - `enabled` - Whether to run this script
 - `args` - Arguments with variable substitution
 - `cwd` - (Optional) Working directory for command type
+- `include_paths` - (Optional) Run only on files matching these patterns
+- `exclude_paths` - (Optional) Skip files matching these patterns (takes precedence)
 
 Variable substitution in args:
 - `{file_path}` - Full POSIX path to the file
@@ -128,6 +130,49 @@ Variable substitution in args:
 - `{group_path}` - Path between database and filename
 - `{base_folder}` - The watch folder base path
 - `{log_level}` - Current log level (DEBUG, INFO, etc.)
+
+### Path Filtering
+
+Scripts can be configured to run only on specific folders using `include_paths` and `exclude_paths`. Patterns use `fnmatch` glob syntax and match against `relative_path` (e.g., `Database/Group/file.pdf`).
+
+**Filtering logic (order of precedence):**
+1. No filters (both empty) → script runs on all files
+2. **Exclude patterns checked first** → if any match, script is skipped (blocklist)
+3. No include patterns → script runs on all non-excluded files
+4. **Include patterns checked second** → at least one must match (allowlist)
+
+**Key principle:** Exclude always wins over include. This "deny-first" approach prevents accidental inclusion of paths that match both patterns.
+
+**Example 1:** Include a database except specific subfolders
+```json
+{
+  "include_paths": ["Liberty University/*"],
+  "exclude_paths": ["Liberty University/Harvard Business Review/*"]
+}
+```
+→ Runs on all Liberty University files EXCEPT Harvard Business Review
+
+**Example 2:** Only run on specific subfolder, ignore rest
+```json
+{
+  "include_paths": ["Liberty University/Harvard Business Review/*"]
+}
+```
+→ Runs ONLY on Harvard Business Review files (no exclude needed)
+
+**Example 3:** Run on everything except Archive folders
+```json
+{
+  "exclude_paths": ["*/Archive/*"]
+}
+```
+→ Runs on all files EXCEPT those in Archive folders
+
+Common patterns:
+- `*/BUSI*/*` - Match BUSI courses in any database
+- `Liberty*/*` - Match Liberty database (with wildcard for variations)
+- `*/Archive/*` - Match Archive folder at any depth
+- `*/Week0?/*` - Match Week01-Week09 using `?` single-character wildcard
 
 ## DEVONthink AppleScript Reference
 
