@@ -395,19 +395,25 @@ def run_foreground(config: Config, watcher_instances: list[WatcherInstance]) -> 
 
     # Startup callback - called after menu bar is visible
     def on_startup() -> None:
-        """Process existing files and start watchers after menu bar appears."""
-        # Process existing files first (for each watcher)
-        for instance in watcher_instances:
-            existing = scan_existing_files(instance.config.watch)
-            if existing:
-                logger.info(f"[{instance.name}] Processing {len(existing)} existing files")
-                for file_path in existing:
-                    instance.pipeline.process_file(file_path)
+        """Start watchers and process existing files after menu bar appears."""
+        import threading
 
-        # Start all watchers
+        # Start all watchers first (so new files are caught)
         for instance in watcher_instances:
             instance.watcher.start()
             logger.info(f"[{instance.name}] Started watching: {instance.config.watch.base_folder}")
+
+        # Process existing files in background thread to keep UI responsive
+        def process_existing() -> None:
+            for instance in watcher_instances:
+                existing = scan_existing_files(instance.config.watch)
+                if existing:
+                    logger.info(f"[{instance.name}] Processing {len(existing)} existing files")
+                    for file_path in existing:
+                        instance.pipeline.process_file(file_path)
+
+        thread = threading.Thread(target=process_existing, daemon=True)
+        thread.start()
 
     # Quit callback
     def on_quit() -> None:

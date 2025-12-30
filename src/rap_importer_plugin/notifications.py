@@ -38,7 +38,10 @@ def notify(title: str, message: str, sound: bool = False) -> bool:
     Returns:
         True if notification was shown successfully
     """
-    if _config is None or not _config.enabled:
+    if _config is None:
+        logger.warning(f"Cannot show notification (config not initialized): {title}")
+        return False
+    if not _config.enabled:
         logger.debug(f"Notifications disabled, skipping: {title}")
         return False
 
@@ -78,7 +81,11 @@ def notify_error(title: str, message: str) -> bool:
     Returns:
         True if notification was shown
     """
-    if _config is None or not _config.on_error:
+    if _config is None:
+        logger.warning(f"Cannot show error notification (config not initialized): {title}")
+        return False
+    if not _config.on_error:
+        logger.debug(f"Error notifications disabled, skipping: {title}")
         return False
     return notify(title, message, sound=True)
 

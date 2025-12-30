@@ -478,3 +478,34 @@ class TestArchiveFile:
         assert (archive_dir / "document-000.pdf").exists()  # Suffix starts at -000
         assert (archive_dir / "document.pdf").read_text() == "first content"
         assert (archive_dir / "document-000.pdf").read_text() == "second content"
+
+
+class TestActiveProcessing:
+    """Tests for active processing counter."""
+
+    def test_active_processing_starts_at_zero(
+        self, mock_executor: MagicMock, watch_config: WatchConfig
+    ) -> None:
+        """Active processing count should start at zero."""
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+        assert pm.active_processing == 0
+
+    def test_active_processing_is_thread_safe(
+        self, mock_executor: MagicMock, watch_config: WatchConfig
+    ) -> None:
+        """Active processing property should use lock for thread safety."""
+        pm = create_pipeline_manager([], watch_config, mock_executor)
+
+        # Verify lock exists
+        assert hasattr(pm, "_active_lock")
+        assert pm._active_processing == 0
+
+        # Manually increment (simulating what process_file does)
+        with pm._active_lock:
+            pm._active_processing += 1
+        assert pm.active_processing == 1
+
+        # Decrement
+        with pm._active_lock:
+            pm._active_processing -= 1
+        assert pm.active_processing == 0

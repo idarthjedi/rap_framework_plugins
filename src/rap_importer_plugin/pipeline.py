@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import shutil
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -55,10 +56,20 @@ class PipelineManager:
         self._failed_files: dict[str, int] = {}
         self._files_processed = 0
 
+        # Track actively processing files (thread-safe)
+        self._active_processing = 0
+        self._active_lock = threading.Lock()
+
     @property
     def files_processed(self) -> int:
         """Number of files successfully processed."""
         return self._files_processed
+
+    @property
+    def active_processing(self) -> int:
+        """Number of files currently being processed (thread-safe)."""
+        with self._active_lock:
+            return self._active_processing
 
     def _should_run_script(self, script: ScriptConfig, relative_path: str) -> bool:
         """Check if script should run based on path filters.
@@ -154,6 +165,30 @@ class PipelineManager:
         if self._is_globally_excluded(relative_path):
             return False  # Silent skip, already logged at DEBUG
 
+        # Track active processing (for menu bar indicator)
+        with self._active_lock:
+            self._active_processing += 1
+
+        try:
+            return self._do_process_file(file_path, base_folder, relative_path, file_key)
+        finally:
+            with self._active_lock:
+                self._active_processing -= 1
+
+    def _do_process_file(
+        self, file_path: Path, base_folder: Path, relative_path: str, file_key: str
+    ) -> bool:
+        """Internal method that performs the actual file processing.
+
+        Args:
+            file_path: Path to the file to process
+            base_folder: Watch folder base path
+            relative_path: Path relative to watch folder
+            file_key: String key for tracking failures
+
+        Returns:
+            True if all scripts succeeded, False otherwise
+        """
         logger.info(f"Processing: {file_path.name}")
 
         # Create variables for substitution
@@ -193,10 +228,12 @@ class PipelineManager:
                 self._record_failure(file_key)
 
                 # Notify user
-                notify_error(
+                logger.debug(f"Sending failure notification for: {file_path.name}")
+                result_notify = notify_error(
                     "Import Failed",
                     f"{file_path.name}: {result.error or 'Unknown error'}",
                 )
+                logger.debug(f"Notification result: {result_notify}")
 
                 return False
 

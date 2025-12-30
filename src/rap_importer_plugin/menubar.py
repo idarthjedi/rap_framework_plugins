@@ -46,6 +46,7 @@ class RAPImporterMenuBar(rumps.App):
         self._last_count = 0
         self._last_counts: dict[str, int] = {}
         self._last_failed_count = 0
+        self._last_active_count = 0
 
         # Build menu
         self._build_menu()
@@ -109,9 +110,20 @@ class RAPImporterMenuBar(rumps.App):
             logger.debug("Running deferred startup callback")
             self.on_startup()
 
-    @rumps.timer(2)
+    @rumps.timer(1)
     def _update_counter(self, _sender: rumps.Timer) -> None:
-        """Periodically update the file counters."""
+        """Periodically update the file counters and menu bar title."""
+        # Update menu bar title based on active processing
+        active = sum(inst.pipeline.active_processing for inst in self.watcher_instances)
+        if active != self._last_active_count:
+            self._last_active_count = active
+            if active > 0:
+                self.title = f"RAP ({active})"
+                logger.debug(f"Processing {active} file(s)")
+            else:
+                self.title = "RAP"
+                logger.debug("Processing complete, title reset")
+
         # Calculate aggregate count
         total = sum(inst.pipeline.files_processed for inst in self.watcher_instances)
 
