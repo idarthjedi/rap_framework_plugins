@@ -1,0 +1,226 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/anthropics/rap_importer_plugin/config.schema.json",
+  "title": "RAP Importer Configuration",
+  "description": "Configuration schema for RAP Importer file watcher and pipeline",
+  "type": "object",
+  "required": ["watchers"],
+  "properties": {
+    "watchers": {
+      "type": "array",
+      "description": "List of folder watchers with their pipelines",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/WatcherConfig"
+      }
+    },
+    "logging": {
+      "$ref": "#/$defs/LoggingConfig"
+    },
+    "notifications": {
+      "$ref": "#/$defs/NotificationsConfig"
+    }
+  },
+  "$defs": {
+    "WatcherConfig": {
+      "type": "object",
+      "description": "Configuration for a single folder watcher with its pipeline",
+      "required": ["name", "watch", "pipeline"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name for this watcher"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this watcher is active",
+          "default": true
+        },
+        "watch": {
+          "$ref": "#/$defs/WatchConfig"
+        },
+        "pipeline": {
+          "$ref": "#/$defs/PipelineConfig"
+        }
+      }
+    },
+    "WatchConfig": {
+      "type": "object",
+      "description": "Configuration for file watching",
+      "required": ["base_folder"],
+      "properties": {
+        "base_folder": {
+          "type": "string",
+          "description": "Base folder to watch (supports ~ expansion)"
+        },
+        "file_patterns": {
+          "type": "array",
+          "description": "Glob patterns for files to process",
+          "items": { "type": "string" },
+          "default": ["*.pdf"]
+        },
+        "ignore_patterns": {
+          "type": "array",
+          "description": "Glob patterns for files to ignore",
+          "items": { "type": "string" },
+          "default": ["*.download", "*.crdownload", "*.tmp"]
+        },
+        "stability_check_seconds": {
+          "type": "number",
+          "description": "Seconds between file size checks for stability",
+          "default": 1.0,
+          "minimum": 0.1
+        },
+        "stability_timeout_seconds": {
+          "type": "number",
+          "description": "Maximum seconds to wait for file stability",
+          "default": 60.0,
+          "minimum": 1.0
+        }
+      }
+    },
+    "PipelineConfig": {
+      "type": "object",
+      "description": "Configuration for the processing pipeline",
+      "required": ["scripts"],
+      "properties": {
+        "scripts": {
+          "type": "array",
+          "description": "Scripts to execute in order",
+          "items": {
+            "$ref": "#/$defs/ScriptConfig"
+          }
+        },
+        "retry_count": {
+          "type": "integer",
+          "description": "Number of retry attempts for failed files",
+          "default": 3,
+          "minimum": 0
+        },
+        "retry_delay_seconds": {
+          "type": "number",
+          "description": "Seconds to wait between retries",
+          "default": 5.0,
+          "minimum": 0
+        },
+        "delete_on_success": {
+          "type": "boolean",
+          "description": "Delete original file after successful processing",
+          "default": true
+        }
+      }
+    },
+    "ScriptConfig": {
+      "type": "object",
+      "description": "Configuration for a single script in the pipeline",
+      "required": ["name", "type", "path"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name for this script"
+        },
+        "reqs": {
+          "type": "string",
+          "description": "Requirements/dependencies description",
+          "default": ""
+        },
+        "type": {
+          "type": "string",
+          "description": "Script type",
+          "enum": ["applescript", "python", "command"]
+        },
+        "path": {
+          "type": "string",
+          "description": "Script path (relative to project) or command string"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether to run this script",
+          "default": true
+        },
+        "args": {
+          "oneOf": [
+            {
+              "type": "array",
+              "description": "Arguments as list with variable substitution",
+              "items": { "type": "string" }
+            },
+            {
+              "type": "object",
+              "description": "Arguments as key-value pairs",
+              "additionalProperties": { "type": "string" }
+            }
+          ],
+          "default": []
+        },
+        "cwd": {
+          "type": ["string", "null"],
+          "description": "Working directory for command type (supports ~ expansion)",
+          "default": null
+        },
+        "include_paths": {
+          "type": "array",
+          "description": "fnmatch patterns - run only on matching paths",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "exclude_paths": {
+          "type": "array",
+          "description": "fnmatch patterns - skip matching paths (takes precedence)",
+          "items": { "type": "string" },
+          "default": []
+        }
+      }
+    },
+    "LoggingConfig": {
+      "type": "object",
+      "description": "Configuration for logging",
+      "properties": {
+        "level": {
+          "type": "string",
+          "description": "Log level",
+          "enum": ["TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+          "default": "INFO"
+        },
+        "file": {
+          "type": "string",
+          "description": "Log file path (supports ~ expansion)",
+          "default": "~/Library/Logs/rap-importer.log"
+        },
+        "max_bytes": {
+          "type": "integer",
+          "description": "Maximum log file size before rotation",
+          "default": 10485760,
+          "minimum": 1024
+        },
+        "backup_count": {
+          "type": "integer",
+          "description": "Number of backup log files to keep",
+          "default": 5,
+          "minimum": 0
+        }
+      }
+    },
+    "NotificationsConfig": {
+      "type": "object",
+      "description": "Configuration for macOS notifications",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable notifications",
+          "default": true
+        },
+        "on_error": {
+          "type": "boolean",
+          "description": "Show notification on errors",
+          "default": true
+        },
+        "on_success": {
+          "type": "boolean",
+          "description": "Show notification on success",
+          "default": false
+        }
+      }
+    }
+  }
+}

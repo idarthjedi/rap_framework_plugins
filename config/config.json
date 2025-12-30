@@ -44,6 +44,16 @@
             "args": ["{file_path}", "--headless", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/", "--log-level={log_level}"],
             "include_paths": ["Liberty University/*"],
             "exclude_paths": ["Liberty University/Harvard Business Review/*"]
+          },
+          {
+            "name": "Harvard Business Review Assessment",
+            "reqs": "Research Assistant Platform setup and configured correctly for the specified plan",
+            "type": "command",
+            "path": "uv run rap hbr_article_summary",
+            "enabled": true,
+            "cwd": "~/development/anthropics/projects/research_analysis_platform",
+            "args": ["{file_path}", "--headless", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/", "--log-level={log_level}"],
+            "include_paths": ["Liberty University/Harvard Business Review/*"]
           }
         ]
       }

@@ -174,6 +174,22 @@ Common patterns:
 - `*/Archive/*` - Match Archive folder at any depth
 - `*/Week0?/*` - Match Week01-Week09 using `?` single-character wildcard
 
+### Config Schema
+
+The config structure is defined in `config/config.schema.json` (JSON Schema Draft 7). This enables:
+- IDE autocomplete when editing `config.json`
+- Schema validation in tests (`tests/test_schema.py`)
+
+**IMPORTANT:** When modifying the config structure:
+1. Update `src/rap_importer_plugin/config.py` (dataclasses)
+2. Update `config/config.schema.json` (JSON Schema)
+3. Run `uv run python -m pytest tests/test_schema.py -v` to verify
+
+The schema tests validate:
+- Schema is valid JSON Schema Draft 7
+- `config/config.json` validates against the schema
+- Invalid configs are correctly rejected
+
 ## DEVONthink AppleScript Reference
 
 View the scripting dictionary:
