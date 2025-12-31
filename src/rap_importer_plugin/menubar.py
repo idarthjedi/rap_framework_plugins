@@ -47,6 +47,8 @@ class RAPImporterMenuBar(rumps.App):
         self._last_counts: dict[str, int] = {}
         self._last_failed_count = 0
         self._last_active_count = 0
+        self._retry_pending = 0  # Track files pending in retry queue
+        self._retry_lock = threading.Lock()
 
         # Build menu
         self._build_menu()
@@ -113,13 +115,17 @@ class RAPImporterMenuBar(rumps.App):
     @rumps.timer(1)
     def _update_counter(self, _sender: rumps.Timer) -> None:
         """Periodically update the file counters and menu bar title."""
-        # Update menu bar title based on active processing
+        # Update menu bar title based on active processing + retry pending
         active = sum(inst.pipeline.active_processing for inst in self.watcher_instances)
-        if active != self._last_active_count:
-            self._last_active_count = active
-            if active > 0:
-                self.title = f"RAP ({active})"
-                logger.debug(f"Processing {active} file(s)")
+        with self._retry_lock:
+            retry_pending = self._retry_pending
+        # Show the higher of active or retry_pending (retry queue may have more waiting)
+        display_count = max(active, retry_pending)
+        if display_count != self._last_active_count:
+            self._last_active_count = display_count
+            if display_count > 0:
+                self.title = f"RAP ({display_count})"
+                logger.debug(f"Processing {display_count} file(s) (active={active}, retry_pending={retry_pending})")
             else:
                 self.title = "RAP"
                 logger.debug("Processing complete, title reset")
@@ -168,11 +174,20 @@ class RAPImporterMenuBar(rumps.App):
         for instance in self.watcher_instances:
             instance.pipeline.reset_failures()
 
+        # Set retry pending count for menu bar display
+        with self._retry_lock:
+            self._retry_pending = len(files_to_retry)
+
         # Re-dispatch each file through the normal watcher callback (same as watchdog)
         # Run in background thread to keep UI responsive
         def do_retry() -> None:
             for instance, file_path in files_to_retry:
-                instance.watcher.on_file_ready(file_path)
+                try:
+                    instance.watcher.on_file_ready(file_path)
+                finally:
+                    # Always decrement pending count, even on error
+                    with self._retry_lock:
+                        self._retry_pending = max(0, self._retry_pending - 1)
 
         thread = threading.Thread(target=do_retry, daemon=True)
         thread.start()

@@ -89,6 +89,8 @@ class StabilityCheckHandler(FileSystemEventHandler):
     def _matches_patterns(self, file_path: Path) -> bool:
         """Check if file matches include patterns and not ignore patterns.
 
+        Pattern matching is case-insensitive (e.g., *.pdf matches .PDF).
+
         Args:
             file_path: Path to check
 
@@ -96,16 +98,17 @@ class StabilityCheckHandler(FileSystemEventHandler):
             True if file should be processed
         """
         filename = file_path.name
+        filename_lower = filename.lower()
 
-        # Check ignore patterns first
+        # Check ignore patterns first (case-insensitive)
         for pattern in self.config.ignore_patterns:
-            if fnmatch.fnmatch(filename, pattern):
+            if fnmatch.fnmatch(filename_lower, pattern.lower()):
                 logger.debug(f"File ignored by pattern '{pattern}': {filename}")
                 return False
 
-        # Check include patterns
+        # Check include patterns (case-insensitive)
         for pattern in self.config.file_patterns:
-            if fnmatch.fnmatch(filename, pattern):
+            if fnmatch.fnmatch(filename_lower, pattern.lower()):
                 return True
 
         logger.debug(f"File doesn't match any include pattern: {filename}")
@@ -246,20 +249,21 @@ def scan_existing_files(config: WatchConfig) -> list[Path]:
     for root, _dirs, filenames in os.walk(base_folder):
         for filename in filenames:
             file_path = Path(root) / filename
+            filename_lower = filename.lower()
 
-            # Check ignore patterns
+            # Check ignore patterns (case-insensitive)
             should_ignore = False
             for pattern in config.ignore_patterns:
-                if fnmatch.fnmatch(filename, pattern):
+                if fnmatch.fnmatch(filename_lower, pattern.lower()):
                     should_ignore = True
                     break
 
             if should_ignore:
                 continue
 
-            # Check include patterns
+            # Check include patterns (case-insensitive)
             for pattern in config.file_patterns:
-                if fnmatch.fnmatch(filename, pattern):
+                if fnmatch.fnmatch(filename_lower, pattern.lower()):
                     files.append(file_path)
                     break
 
