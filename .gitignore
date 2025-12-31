@@ -11,3 +11,5 @@ wheels/
 
 # IDE
 .idea/
+/scripts/migrate_sha1_to_sha256.py
+/scripts/migration_progress.json

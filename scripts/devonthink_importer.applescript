@@ -16,7 +16,7 @@
 --   Throws error on failure
 --
 -- Duplicate Detection:
---   Uses SHA-1 hash of original file stored as custom metadata "sourceHash".
+--   Uses SHA-256 hash of original file stored as custom metadata "sourceHash".
 --   DEVONthink's built-in contentHash changes after OCR processing, so we
 --   calculate and store the original file hash before import. Future imports
 --   search for records with matching sourceHash to detect duplicates.
@@ -81,9 +81,9 @@ end run
 -- ===================
 
 on calculateFileHash(filePath)
-	-- Calculate SHA-1 hash of file using shasum command
+	-- Calculate SHA-256 hash of file using shasum command
 	try
-		set hashResult to do shell script "shasum -a 1 " & quoted form of filePath & " | awk '{print $1}'"
+		set hashResult to do shell script "shasum -a 256 " & quoted form of filePath & " | awk '{print $1}'"
 		return hashResult
 	on error errMsg
 		error "Failed to calculate file hash: " & errMsg number 1007
