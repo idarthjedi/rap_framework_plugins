@@ -49,11 +49,26 @@ class RAPImporterMenuBar(rumps.App):
         self._last_active_count = 0
         self._retry_pending = 0  # Track files pending in retry queue
         self._retry_lock = threading.Lock()
+        self._startup_pending = 0  # Track files pending at startup
+        self._startup_lock = threading.Lock()
 
         # Build menu
         self._build_menu()
 
         logger.debug(f"Menu bar app initialized with {len(watcher_instances)} watchers")
+
+    def set_startup_pending(self, count: int) -> None:
+        """Set the number of files pending at startup."""
+        with self._startup_lock:
+            self._startup_pending = count
+        logger.info(f"Set _startup_pending = {count}")
+
+    def decrement_startup_pending(self) -> None:
+        """Decrement the startup pending counter."""
+        with self._startup_lock:
+            self._startup_pending = max(0, self._startup_pending - 1)
+            remaining = self._startup_pending
+        logger.debug(f"Decremented _startup_pending to {remaining}")
 
     def _build_menu(self) -> None:
         """Build the menu structure."""
@@ -115,17 +130,19 @@ class RAPImporterMenuBar(rumps.App):
     @rumps.timer(1)
     def _update_counter(self, _sender: rumps.Timer) -> None:
         """Periodically update the file counters and menu bar title."""
-        # Update menu bar title based on active processing + retry pending
+        # Update menu bar title based on active processing + retry/startup pending
         active = sum(inst.pipeline.active_processing for inst in self.watcher_instances)
         with self._retry_lock:
             retry_pending = self._retry_pending
-        # Show the higher of active or retry_pending (retry queue may have more waiting)
-        display_count = max(active, retry_pending)
+        with self._startup_lock:
+            startup_pending = self._startup_pending
+        # Show the highest of active, retry_pending, or startup_pending
+        display_count = max(active, retry_pending, startup_pending)
         if display_count != self._last_active_count:
             self._last_active_count = display_count
             if display_count > 0:
                 self.title = f"RAP ({display_count})"
-                logger.debug(f"Processing {display_count} file(s) (active={active}, retry_pending={retry_pending})")
+                logger.debug(f"Processing {display_count} file(s) (active={active}, retry={retry_pending}, startup={startup_pending})")
             else:
                 self.title = "RAP"
                 logger.debug("Processing complete, title reset")
@@ -177,17 +194,23 @@ class RAPImporterMenuBar(rumps.App):
         # Set retry pending count for menu bar display
         with self._retry_lock:
             self._retry_pending = len(files_to_retry)
+        logger.info(f"Set _retry_pending = {len(files_to_retry)}")
 
         # Re-dispatch each file through the normal watcher callback (same as watchdog)
         # Run in background thread to keep UI responsive
+        # Capture self reference for closure
+        menu_bar = self
+
         def do_retry() -> None:
-            for instance, file_path in files_to_retry:
+            for i, (instance, file_path) in enumerate(files_to_retry, 1):
+                logger.debug(f"Retry processing file {i}/{len(files_to_retry)}: {file_path.name}")
                 try:
-                    instance.watcher.on_file_ready(file_path)
+                    instance.pipeline.process_file(file_path)
                 finally:
                     # Always decrement pending count, even on error
-                    with self._retry_lock:
-                        self._retry_pending = max(0, self._retry_pending - 1)
+                    with menu_bar._retry_lock:
+                        menu_bar._retry_pending = max(0, menu_bar._retry_pending - 1)
+                        logger.debug(f"Decremented _retry_pending to {menu_bar._retry_pending}")
 
         thread = threading.Thread(target=do_retry, daemon=True)
         thread.start()
@@ -234,7 +257,7 @@ def run_menubar(
     watcher_instances: list[WatcherInstance],
     log_path: Path,
     on_quit: Callable[[], None],
-    on_startup: Callable[[], None] | None = None,
+    on_startup: Callable[[RAPImporterMenuBar], None] | None = None,
 ) -> None:
     """Run the menu bar application.
 
@@ -244,8 +267,13 @@ def run_menubar(
         watcher_instances: List of watcher/pipeline pairs
         log_path: Path to log file
         on_quit: Callback to run when quitting
-        on_startup: Callback to run after menu bar appears (for deferred init)
+        on_startup: Callback to run after menu bar appears, receives app instance
     """
-    app = RAPImporterMenuBar(watcher_instances, log_path, on_quit, on_startup)
+    # Create wrapper that passes app instance to on_startup
+    def startup_wrapper() -> None:
+        if on_startup:
+            on_startup(app)
+
+    app = RAPImporterMenuBar(watcher_instances, log_path, on_quit, startup_wrapper)
     logger.info(f"Starting menu bar app with {len(watcher_instances)} watchers")
     app.run()

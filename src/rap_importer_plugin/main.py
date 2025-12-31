@@ -394,7 +394,7 @@ def run_foreground(config: Config, watcher_instances: list[WatcherInstance]) -> 
     signal.signal(signal.SIGTERM, handle_signal)
 
     # Startup callback - called after menu bar is visible
-    def on_startup() -> None:
+    def on_startup(app) -> None:
         """Start watchers and process existing files after menu bar appears."""
         import threading
 
@@ -403,14 +403,39 @@ def run_foreground(config: Config, watcher_instances: list[WatcherInstance]) -> 
             instance.watcher.start()
             logger.info(f"[{instance.name}] Started watching: {instance.config.watch.base_folder}")
 
+        # Collect all existing files first to get total count
+        # Filter out globally excluded paths (like _Archived/*, */EndNote/*)
+        all_existing: list[tuple[WatcherInstance, Path]] = []
+        for instance in watcher_instances:
+            existing = scan_existing_files(instance.config.watch)
+            if existing:
+                base_folder = instance.config.watch.expanded_base_folder
+                filtered = []
+                for file_path in existing:
+                    try:
+                        relative_path = str(file_path.relative_to(base_folder))
+                    except ValueError:
+                        relative_path = file_path.name
+                    # Use pipeline's global exclude check
+                    if not instance.pipeline._is_globally_excluded(relative_path):
+                        filtered.append(file_path)
+                        all_existing.append((instance, file_path))
+                logger.info(f"[{instance.name}] Found {len(filtered)} existing files ({len(existing) - len(filtered)} excluded)")
+
+        if not all_existing:
+            logger.info("No existing files to process")
+            return
+
+        # Set startup pending count for menu bar display
+        app.set_startup_pending(len(all_existing))
+
         # Process existing files in background thread to keep UI responsive
         def process_existing() -> None:
-            for instance in watcher_instances:
-                existing = scan_existing_files(instance.config.watch)
-                if existing:
-                    logger.info(f"[{instance.name}] Processing {len(existing)} existing files")
-                    for file_path in existing:
-                        instance.pipeline.process_file(file_path)
+            for instance, file_path in all_existing:
+                try:
+                    instance.pipeline.process_file(file_path)
+                finally:
+                    app.decrement_startup_pending()
 
         thread = threading.Thread(target=process_existing, daemon=True)
         thread.start()
