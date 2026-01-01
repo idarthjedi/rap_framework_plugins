@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 logger = get_logger("executor")
 
 # Default timeout for script execution (5 minutes)
-DEFAULT_TIMEOUT = 600
+DEFAULT_TIMEOUT = 300
 
 
 @dataclass
