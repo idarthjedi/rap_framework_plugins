@@ -5,7 +5,7 @@
       "enabled": true,
       "global_exclude_paths": ["*/EndNote/*"],
       "watch": {
-        "base_folder": "~/Documents/RAPPlatform-Import",
+        "base_folder": "~/RAP/RAPPlatform-Import",
         "file_patterns": ["*.pdf"],
         "ignore_patterns": ["*.download", "*.crdownload", "*.tmp"],
         "stability_check_seconds": 1.0,
@@ -52,7 +52,7 @@
             "path": "uv run rap hbr_article_summary",
             "enabled": true,
             "cwd": "~/development/anthropics/projects/research_analysis_platform",
-            "args": ["{file_path}", "--headless", "--output-dir=~/Documents/RAPPlatform-Obsidian/{database}/{group_path}/", "--log-level={log_level}"],
+            "args": ["{file_path}", "--headless", "--output-dir=~/RAP/RAPPlatform-Obsidian/{database}/{group_path}/", "--log-level={log_level}"],
             "include_paths": ["Liberty.University/Harvard Business Review/*"]
           }
         ]
@@ -62,7 +62,7 @@
       "name": "Obsidian Transformer",
       "enabled": true,
       "watch": {
-        "base_folder": "~/Documents/RAPPlatform-Obsidian",
+        "base_folder": "~/RAP/RAPPlatform-Obsidian",
         "file_patterns": ["*.md"],
         "ignore_patterns": ["*.tmp"],
         "stability_check_seconds": 1.0,
