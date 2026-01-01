@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 logger = get_logger("executor")
 
 # Default timeout for script execution (5 minutes)
-DEFAULT_TIMEOUT = 300
+DEFAULT_TIMEOUT = 600
 
 
 @dataclass
@@ -30,6 +30,7 @@ class ExecutionResult:
     output: str
     error: str | None
     duration_ms: int
+    stderr: str = ""  # Captured stderr (for timing info, etc.)
 
     def __str__(self) -> str:
         status = "SUCCESS" if self.success else "FAILED"
@@ -423,6 +424,8 @@ class ScriptExecutor:
 
             duration_ms = int((time.time() - start_time) * 1000)
 
+            stderr_content = result.stderr.strip() if result.stderr else ""
+
             if result.returncode == 0:
                 logger.trace(f"stdout: {result.stdout.strip()}")  # type: ignore[attr-defined]
                 return ExecutionResult(
@@ -430,15 +433,17 @@ class ScriptExecutor:
                     output=result.stdout.strip(),
                     error=None,
                     duration_ms=duration_ms,
+                    stderr=stderr_content,
                 )
             else:
-                error_msg = result.stderr.strip() or f"Exit code: {result.returncode}"
+                error_msg = stderr_content or f"Exit code: {result.returncode}"
                 logger.debug(f"Script failed: {error_msg}")
                 return ExecutionResult(
                     success=False,
                     output=result.stdout.strip(),
                     error=error_msg,
                     duration_ms=duration_ms,
+                    stderr=stderr_content,
                 )
 
         except subprocess.TimeoutExpired:

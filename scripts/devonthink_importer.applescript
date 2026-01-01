@@ -44,20 +44,30 @@ on run argv
 	-- Get or create destination group
 	set destGroup to my getOrCreateDestinationGroup(theDatabase, groupPath, isInbox, isRootLevel)
 
-	-- Calculate SHA-1 hash of incoming file
+	-- Calculate SHA-256 hash of incoming file (with timing)
+	set hashStart to my getMilliseconds()
 	set fileHash to my calculateFileHash(filePath)
+	set hashEnd to my getMilliseconds()
+	my logTiming("hash", hashStart, hashEnd)
 
-	-- Check for existing record with same content hash
+	-- Check for existing record with same content hash (with timing)
+	set searchStart to my getMilliseconds()
 	set existingRecord to my findRecordByHash(fileHash, theDatabase)
+	set searchEnd to my getMilliseconds()
+	my logTiming("search", searchStart, searchEnd)
 
 	if existingRecord is not missing value then
 		-- Duplicate found: replicate to destination group
+		set replicateStart to my getMilliseconds()
 		tell application id "DNtp"
 			replicate record existingRecord to destGroup
 		end tell
+		set replicateEnd to my getMilliseconds()
+		my logTiming("replicate", replicateStart, replicateEnd)
 		return "replicated"
 	else
-		-- No duplicate: OCR and import
+		-- No duplicate: OCR and import (with timing)
+		set ocrStart to my getMilliseconds()
 		tell application id "DNtp"
 			set theRecord to ocr file filePath to destGroup
 
@@ -68,6 +78,8 @@ on run argv
 
 				-- Trigger smart rules
 				perform smart rule record theRecord trigger OCR event
+				set ocrEnd to my getMilliseconds()
+				my logTiming("ocr", ocrStart, ocrEnd)
 				return "success"
 			else
 				error "OCR did not return a record" number 1006
@@ -75,6 +87,23 @@ on run argv
 		end tell
 	end if
 end run
+
+-- ===================
+-- TIMING UTILITIES
+-- ===================
+
+on getMilliseconds()
+	-- Get current time in milliseconds using Python (reliable across macOS versions)
+	set msStr to do shell script "python3 -c 'import time; print(int(time.time() * 1000))'"
+	return msStr as number
+end getMilliseconds
+
+on logTiming(operation, startMs, endMs)
+	-- Log timing to stderr (captured by Python executor)
+	set elapsedMs to endMs - startMs
+	set elapsedSec to elapsedMs / 1000
+	do shell script "echo 'TIMING: " & operation & "=" & elapsedSec & "s' >&2"
+end logTiming
 
 -- ===================
 -- HASH UTILITIES

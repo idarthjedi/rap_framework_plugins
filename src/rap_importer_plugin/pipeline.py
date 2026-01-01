@@ -189,6 +189,7 @@ class PipelineManager:
         Returns:
             True if all scripts succeeded, False otherwise
         """
+        pipeline_start = time.time()
         logger.info(f"Processing: {file_path.name}")
 
         # Create variables for substitution
@@ -214,6 +215,16 @@ class PipelineManager:
             logger.debug(f"Running script {i}/{len(scripts)}: {script.name}")
 
             result = self.executor.execute(script, variables)
+
+            # Log script execution time
+            duration_sec = result.duration_ms / 1000
+            logger.info(f"  [{script.name}] completed in {duration_sec:.2f}s")
+
+            # Log any TIMING output from AppleScript (captured in stderr)
+            if result.stderr and "TIMING:" in result.stderr:
+                for line in result.stderr.splitlines():
+                    if line.startswith("TIMING:"):
+                        logger.info(f"  [{script.name}] {line}")
 
             if not result.success:
                 logger.error(
@@ -242,10 +253,11 @@ class PipelineManager:
                 for line in result.output.splitlines():
                     logger.info(f"  [{script.name}] {line}")
             else:
-                logger.debug(f"Script '{script.name}' completed: {result}")
+                logger.debug(f"Script '{script.name}] result: {result}")
 
         # All scripts succeeded
-        logger.info(f"Pipeline complete for: {file_path.name}")
+        pipeline_elapsed = time.time() - pipeline_start
+        logger.info(f"Pipeline complete for: {file_path.name} (total: {pipeline_elapsed:.2f}s)")
 
         # Archive the original file
         self._archive_file(file_path)
