@@ -52,8 +52,34 @@
             "path": "uv run rap hbr_article_summary",
             "enabled": true,
             "cwd": "~/development/anthropics/projects/research_analysis_platform",
-            "args": ["{file_path}", "--headless", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/", "--log-level={log_level}"],
+            "args": ["{file_path}", "--headless", "--output-dir=~/Documents/RAPPlatform-Obsidian/{database}/{group_path}/", "--log-level={log_level}"],
             "include_paths": ["Liberty.University/Harvard Business Review/*"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "Obsidian Transformer",
+      "enabled": true,
+      "watch": {
+        "base_folder": "~/Documents/RAPPlatform-Obsidian",
+        "file_patterns": ["*.md"],
+        "ignore_patterns": ["*.tmp"],
+        "stability_check_seconds": 1.0,
+        "stability_timeout_seconds": 60
+      },
+      "pipeline": {
+        "retry_count": 3,
+        "retry_delay_seconds": 5,
+        "scripts": [
+          {
+            "name": "Obsidian Frontmatter",
+            "reqs": "Output from the RAP Research - Harvard Business Review Assessment (And it's dependencies).",
+            "type": "command",
+            "path": "uv run obsidian-frontmatter",
+            "enabled": true,
+            "cwd": "~/development/anthropics/projects/rap_obsidian_utils",
+            "args": ["{file_path}", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/"]
           }
         ]
       }
