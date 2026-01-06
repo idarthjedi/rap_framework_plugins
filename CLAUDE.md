@@ -6,6 +6,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 RAP Importer is a Python-based file watcher with a configurable pipeline for automatically importing PDFs into DEVONthink with OCR. Files are routed to the correct database and group based on their folder structure.
 
+## Documentation
+
+### Wiki (User-Facing Documentation)
+
+The RAP Framework Wiki contains user-facing documentation for this project:
+- **Location:** `~/development/anthropics/projects/rap_framework.wiki/`
+- **URL:** https://github.com/idarthjedi/rap_framework/wiki
+
+**When to update the wiki:**
+- Adding or changing CLI options
+- Modifying pipeline configuration format
+- Changing watch folder behavior
+- Adding new script types or variables
+- Updating installation or setup procedures
+
+**Wiki pages for this project:**
+
+| Change Type | Wiki Page(s) to Update |
+|-------------|------------------------|
+| CLI options | `CLI-Reference.md` |
+| Installation/setup | `Installation.md`, `Importer-Setup.md` |
+| Pipeline config | `Pipeline-Configuration.md`, `Configuration.md` |
+| DEVONthink integration | `DEVONthink-Integration.md` |
+| Architecture changes | `System-Overview.md`, `Data-Flow.md` |
+
+### Documentation Map
+
+| Topic | Location | Audience |
+|-------|----------|----------|
+| User guide, CLI reference | [RAP Framework Wiki](https://github.com/idarthjedi/rap_framework/wiki) | Users |
+| Implementation details | This file (`CLAUDE.md`) | Developers |
+| Config schema | `config/config.schema.json` | Developers |
+
 ## Architecture
 
 ```
