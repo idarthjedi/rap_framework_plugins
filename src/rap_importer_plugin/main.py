@@ -56,12 +56,21 @@ logger = get_logger("main")
 
 @dataclass
 class WatcherInstance:
-    """Runtime instance of a watcher with its pipeline."""
+    """Runtime instance of a watcher with its pipeline.
+
+    For auto watchers, the watcher field contains a FileWatcher.
+    For manual watchers, the watcher field is None (no file watching).
+    """
 
     name: str
-    watcher: FileWatcher
+    watcher: FileWatcher | None  # None for manual trigger watchers
     pipeline: PipelineManager
     config: WatcherConfig
+
+    @property
+    def is_manual(self) -> bool:
+        """Check if this is a manual trigger watcher."""
+        return self.config.is_manual
 
 
 def _is_process_running(pid: int) -> bool:
@@ -234,9 +243,16 @@ def main() -> int:
             executor=executor,
             global_exclude_paths=watcher_config.global_exclude_paths,
             log_level=config.logging.level,
+            archive=watcher_config.should_archive,
         )
 
-        watcher = FileWatcher(watcher_config.watch, pipeline.process_file)
+        # Only create FileWatcher for auto-trigger watchers
+        if watcher_config.is_manual:
+            watcher = None
+            trigger_type = "manual"
+        else:
+            watcher = FileWatcher(watcher_config.watch, pipeline.process_file)
+            trigger_type = "auto"
 
         watcher_instances.append(WatcherInstance(
             name=watcher_config.name,
@@ -245,7 +261,7 @@ def main() -> int:
             config=watcher_config,
         ))
 
-        logger.info(f"Created watcher: {watcher_config.name} -> {watcher_config.watch.base_folder}")
+        logger.info(f"Created watcher: {watcher_config.name} ({trigger_type}) -> {watcher_config.watch.base_folder}")
 
     # Run in appropriate mode
     if args.mode == ExecutionMode.RUNONCE:
@@ -265,12 +281,18 @@ def run_once(config: Config, watcher_instances: list[WatcherInstance]) -> int:
     Returns:
         Exit code
     """
-    logger.info(f"Running in run-once mode with {len(watcher_instances)} watchers")
+    # Filter to only auto watchers (manual watchers don't process in runonce)
+    auto_watchers = [w for w in watcher_instances if not w.is_manual]
+    manual_count = len(watcher_instances) - len(auto_watchers)
+
+    logger.info(f"Running in run-once mode with {len(auto_watchers)} auto watchers")
+    if manual_count > 0:
+        logger.info(f"Skipping {manual_count} manual watcher(s)")
 
     total_files = 0
     total_success = 0
 
-    for instance in watcher_instances:
+    for instance in auto_watchers:
         # Scan for existing files
         files = scan_existing_files(instance.config.watch)
 
@@ -387,7 +409,8 @@ def run_foreground(config: Config, watcher_instances: list[WatcherInstance]) -> 
             shutdown_requested = True
             logger.info(f"Received signal {signum}, shutting down...")
             for instance in watcher_instances:
-                instance.watcher.stop()
+                if instance.watcher is not None:
+                    instance.watcher.stop()
             sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_signal)
@@ -398,15 +421,20 @@ def run_foreground(config: Config, watcher_instances: list[WatcherInstance]) -> 
         """Start watchers and process existing files after menu bar appears."""
         import threading
 
-        # Start all watchers first (so new files are caught)
+        # Start only auto watchers (manual watchers don't watch for files)
         for instance in watcher_instances:
-            instance.watcher.start()
-            logger.info(f"[{instance.name}] Started watching: {instance.config.watch.base_folder}")
+            if instance.watcher is not None:
+                instance.watcher.start()
+                logger.info(f"[{instance.name}] Started watching: {instance.config.watch.base_folder}")
+            else:
+                logger.info(f"[{instance.name}] Manual trigger (no file watching)")
 
-        # Collect all existing files first to get total count
+        # Collect existing files only from auto watchers
         # Filter out globally excluded paths (like _Archived/*, */EndNote/*)
         all_existing: list[tuple[WatcherInstance, Path]] = []
         for instance in watcher_instances:
+            if instance.is_manual:
+                continue  # Skip manual watchers for startup processing
             existing = scan_existing_files(instance.config.watch)
             if existing:
                 base_folder = instance.config.watch.expanded_base_folder
@@ -444,7 +472,8 @@ def run_foreground(config: Config, watcher_instances: list[WatcherInstance]) -> 
     def on_quit() -> None:
         logger.info("Shutting down from menu bar")
         for instance in watcher_instances:
-            instance.watcher.stop()
+            if instance.watcher is not None:
+                instance.watcher.stop()
 
     # Run menu bar app (blocks until quit)
     # on_startup is called after menu bar appears to process existing files

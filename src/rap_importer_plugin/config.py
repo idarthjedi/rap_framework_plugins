@@ -96,13 +96,47 @@ class NotificationsConfig:
 
 @dataclass
 class WatcherConfig:
-    """Configuration for a single folder watcher with its pipeline."""
+    """Configuration for a single folder watcher with its pipeline.
+
+    Attributes:
+        name: Display name for the watcher
+        watch: Watch configuration (folder, patterns, etc.)
+        pipeline: Pipeline configuration (scripts to run)
+        global_exclude_paths: fnmatch patterns to skip globally
+        enabled: Whether this watcher is active
+        trigger: Trigger mode - "auto" (watchdog) or "manual" (menu click)
+        archive: Whether to archive files after processing (None = default based on trigger)
+    """
 
     name: str
     watch: WatchConfig
     pipeline: PipelineConfig
-    global_exclude_paths: list[str] = field(default_factory=list)  # fnmatch patterns to skip globally
+    global_exclude_paths: list[str] = field(default_factory=list)
     enabled: bool = True
+    trigger: str = "auto"  # "auto" or "manual"
+    archive: bool | None = None  # None = default based on trigger type
+
+    def __post_init__(self) -> None:
+        if self.trigger not in ("auto", "manual"):
+            raise ValueError(
+                f"Invalid trigger: {self.trigger}. Must be 'auto' or 'manual'"
+            )
+
+    @property
+    def should_archive(self) -> bool:
+        """Return whether to archive files after processing.
+
+        If archive is explicitly set, use that value.
+        Otherwise, default to True for auto watchers, False for manual.
+        """
+        if self.archive is not None:
+            return self.archive
+        return self.trigger == "auto"
+
+    @property
+    def is_manual(self) -> bool:
+        """Return whether this is a manual trigger watcher."""
+        return self.trigger == "manual"
 
 
 @dataclass
@@ -205,6 +239,8 @@ def _parse_watcher_config(data: dict[str, Any]) -> WatcherConfig:
         pipeline=_parse_pipeline_config(data["pipeline"]),
         global_exclude_paths=data.get("global_exclude_paths", []),
         enabled=data.get("enabled", True),
+        trigger=data.get("trigger", "auto"),
+        archive=data.get("archive"),  # None if not specified
     )
 
 

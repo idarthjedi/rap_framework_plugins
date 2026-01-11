@@ -51,11 +51,20 @@ class RAPImporterMenuBar(rumps.App):
         self._retry_lock = threading.Lock()
         self._startup_pending = 0  # Track files pending at startup
         self._startup_lock = threading.Lock()
+        self._manual_pending = 0  # Track manual pipeline runs in progress
+        self._manual_lock = threading.Lock()
+
+        # Separate auto and manual watchers
+        self._auto_watchers = [w for w in watcher_instances if not w.is_manual]
+        self._manual_watchers = [w for w in watcher_instances if w.is_manual]
 
         # Build menu
         self._build_menu()
 
         logger.debug(f"Menu bar app initialized with {len(watcher_instances)} watchers")
+        logger.debug(f"Auto watchers: {len(self._auto_watchers)}, Manual watchers: {len(self._manual_watchers)}")
+        if self._manual_watchers:
+            logger.debug(f"Manual watcher names: {[w.name for w in self._manual_watchers]}")
 
     def set_startup_pending(self, count: int) -> None:
         """Set the number of files pending at startup."""
@@ -85,6 +94,15 @@ class RAPImporterMenuBar(rumps.App):
             item = rumps.MenuItem(f"  {instance.name}: 0")
             self.watcher_items[instance.name] = item
 
+        # Run Manual submenu (only if there are manual watchers)
+        self.manual_submenu: rumps.MenuItem | None = None
+        if self._manual_watchers:
+            self.manual_submenu = rumps.MenuItem("Run Manual")
+            for instance in self._manual_watchers:
+                callback = self._create_manual_callback(instance)
+                item = rumps.MenuItem(instance.name, callback=callback)
+                self.manual_submenu.add(item)
+
         # Retry failed files
         self.retry_item = rumps.MenuItem("Retry - 0", callback=self._retry)
 
@@ -104,8 +122,13 @@ class RAPImporterMenuBar(rumps.App):
         for item in self.watcher_items.values():
             menu_items.append(item)
 
+        menu_items.append(None)  # Separator
+
+        # Add Run Manual submenu if there are manual watchers
+        if self.manual_submenu:
+            menu_items.append(self.manual_submenu)
+
         menu_items.extend([
-            None,  # Separator
             self.retry_item,
             self.log_item,
             self.quit_item,
@@ -130,19 +153,21 @@ class RAPImporterMenuBar(rumps.App):
     @rumps.timer(1)
     def _update_counter(self, _sender: rumps.Timer) -> None:
         """Periodically update the file counters and menu bar title."""
-        # Update menu bar title based on active processing + retry/startup pending
+        # Update menu bar title based on active processing + retry/startup/manual pending
         active = sum(inst.pipeline.active_processing for inst in self.watcher_instances)
         with self._retry_lock:
             retry_pending = self._retry_pending
         with self._startup_lock:
             startup_pending = self._startup_pending
-        # Show the highest of active, retry_pending, or startup_pending
-        display_count = max(active, retry_pending, startup_pending)
+        with self._manual_lock:
+            manual_pending = self._manual_pending
+        # Show the highest of active, retry_pending, startup_pending, or manual_pending
+        display_count = max(active, retry_pending, startup_pending, manual_pending)
         if display_count != self._last_active_count:
             self._last_active_count = display_count
             if display_count > 0:
                 self.title = f"RAP ({display_count})"
-                logger.debug(f"Processing {display_count} file(s) (active={active}, retry={retry_pending}, startup={startup_pending})")
+                logger.debug(f"Processing {display_count} file(s) (active={active}, retry={retry_pending}, startup={startup_pending}, manual={manual_pending})")
             else:
                 self.title = "RAP"
                 logger.debug("Processing complete, title reset")
@@ -170,6 +195,47 @@ class RAPImporterMenuBar(rumps.App):
             self._last_failed_count = failed_count
             self.retry_item.title = f"Retry - {failed_count}"
             logger.debug(f"Updated failed counter: {failed_count}")
+
+    def _create_manual_callback(self, instance: WatcherInstance) -> Callable:
+        """Create a callback function for a manual watcher menu item.
+
+        Args:
+            instance: The watcher instance to run
+
+        Returns:
+            Callback function for rumps MenuItem
+        """
+        def callback(_sender: rumps.MenuItem) -> None:
+            self._run_manual(instance)
+        return callback
+
+    def _run_manual(self, instance: WatcherInstance) -> None:
+        """Run a manual pipeline in a background thread.
+
+        Args:
+            instance: The watcher instance to run
+        """
+        logger.info(f"Running manual pipeline: {instance.name}")
+
+        # Set manual pending count for menu bar display
+        with self._manual_lock:
+            self._manual_pending += 1
+        logger.debug(f"Set _manual_pending = {self._manual_pending}")
+
+        # Capture self reference for closure
+        menu_bar = self
+
+        def do_manual() -> None:
+            try:
+                instance.pipeline.run_manual()
+            finally:
+                # Always decrement pending count, even on error
+                with menu_bar._manual_lock:
+                    menu_bar._manual_pending = max(0, menu_bar._manual_pending - 1)
+                    logger.debug(f"Decremented _manual_pending to {menu_bar._manual_pending}")
+
+        thread = threading.Thread(target=do_manual, daemon=True)
+        thread.start()
 
     def _retry(self, _sender: rumps.MenuItem) -> None:
         """Retry all failed files by re-dispatching to normal processing flow."""

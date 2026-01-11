@@ -36,6 +36,17 @@
           "description": "Whether this watcher is active",
           "default": true
         },
+        "trigger": {
+          "type": "string",
+          "description": "Trigger mode: 'auto' watches for files, 'manual' runs on menu click",
+          "enum": ["auto", "manual"],
+          "default": "auto"
+        },
+        "archive": {
+          "type": ["boolean", "null"],
+          "description": "Archive files after processing. Default: true for auto, false for manual",
+          "default": null
+        },
         "global_exclude_paths": {
           "type": "array",
           "description": "fnmatch patterns - skip files globally (all scripts and deletion)",

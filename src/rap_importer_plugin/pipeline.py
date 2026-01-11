@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from .executor import FileVariables, ScriptExecutor
+from .executor import FileVariables, ManualVariables, ScriptExecutor
 from .logging_config import get_logger
 from .notifications import notify_error, notify_success
 
@@ -30,6 +30,7 @@ class PipelineManager:
         global_exclude_paths: list[str] | None = None,
         on_success: Callable[[], None] | None = None,
         log_level: str = "INFO",
+        archive: bool = True,
     ) -> None:
         """Initialize the pipeline manager.
 
@@ -40,12 +41,14 @@ class PipelineManager:
             global_exclude_paths: Patterns to exclude globally (all scripts and deletion)
             on_success: Optional callback when file is successfully processed
             log_level: Current log level (for variable substitution in scripts)
+            archive: Whether to archive files after successful processing
         """
         self.config = pipeline_config
         self.watch_config = watch_config
         self.executor = executor
         self.on_success = on_success
         self.log_level = log_level
+        self.archive = archive
 
         # Set up global exclude paths, always including _Archived folder
         self.global_exclude_paths = list(global_exclude_paths or [])
@@ -259,8 +262,9 @@ class PipelineManager:
         pipeline_elapsed = time.time() - pipeline_start
         logger.info(f"Pipeline complete for: {file_path.name} (total: {pipeline_elapsed:.2f}s)")
 
-        # Archive the original file
-        self._archive_file(file_path)
+        # Archive the original file (if enabled)
+        if self.archive:
+            self._archive_file(file_path)
 
         # Clear any failure tracking
         self._failed_files.pop(file_key, None)
@@ -406,3 +410,100 @@ class PipelineManager:
                     success_count += 1
 
         return success_count
+
+    def run_manual(self) -> bool:
+        """Run all scripts once for manual trigger (no file context).
+
+        This method runs scripts with only {base_folder} and {log_level} available,
+        suitable for commands that operate on the folder as a whole rather than
+        individual files.
+
+        Returns:
+            True if all scripts succeeded, False otherwise
+        """
+        run_start = time.time()
+        logger.info(f"Running manual pipeline: {self.watch_config.base_folder}")
+
+        # Create variables for substitution (no file context)
+        variables = ManualVariables.from_watch_config(
+            self.watch_config,
+            self.log_level,
+        )
+
+        logger.debug(f"Manual variables: base_folder={variables.base_folder}")
+
+        # Track active processing (for menu bar indicator)
+        with self._active_lock:
+            self._active_processing += 1
+
+        try:
+            return self._do_run_manual(variables, run_start)
+        finally:
+            with self._active_lock:
+                self._active_processing -= 1
+
+    def _do_run_manual(self, variables: ManualVariables, run_start: float) -> bool:
+        """Internal method that performs the manual pipeline run.
+
+        Args:
+            variables: ManualVariables for substitution
+            run_start: Start time for duration logging
+
+        Returns:
+            True if all scripts succeeded, False otherwise
+        """
+        # Get enabled scripts (no path filtering for manual mode)
+        scripts = self.config.enabled_scripts
+
+        if not scripts:
+            logger.info("No enabled scripts in manual pipeline")
+            return True  # Not an error, just nothing to do
+
+        for i, script in enumerate(scripts, 1):
+            logger.debug(f"Running script {i}/{len(scripts)}: {script.name}")
+
+            result = self.executor.execute(script, variables)
+
+            # Log script execution time
+            duration_sec = result.duration_ms / 1000
+            logger.info(f"  [{script.name}] completed in {duration_sec:.2f}s")
+
+            # Log any TIMING output (captured in stderr)
+            if result.stderr and "TIMING:" in result.stderr:
+                for line in result.stderr.splitlines():
+                    if line.startswith("TIMING:"):
+                        logger.info(f"  [{script.name}] {line}")
+
+            if not result.success:
+                logger.error(f"Script '{script.name}' failed: {result.error}")
+                if result.output:
+                    for line in result.output.splitlines():
+                        logger.error(f"  stdout: {line}")
+
+                notify_error(
+                    "Manual Run Failed",
+                    f"{script.name}: {result.error or 'Unknown error'}",
+                )
+                return False
+
+            # Log script output at INFO level if present
+            if result.output:
+                for line in result.output.splitlines():
+                    logger.info(f"  [{script.name}] {line}")
+
+        # All scripts succeeded
+        run_elapsed = time.time() - run_start
+        logger.info(f"Manual pipeline complete (total: {run_elapsed:.2f}s)")
+
+        # Increment counter for display
+        self._files_processed += 1
+
+        if self.on_success:
+            self.on_success()
+
+        notify_success(
+            "Manual Run Complete",
+            "Pipeline completed successfully",
+        )
+
+        return True

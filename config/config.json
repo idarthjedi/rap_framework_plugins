@@ -3,11 +3,19 @@
     {
       "name": "RAP Research",
       "enabled": true,
-      "global_exclude_paths": ["*/EndNote/*"],
+      "global_exclude_paths": [
+        "*/EndNote/*"
+      ],
       "watch": {
         "base_folder": "~/RAP/RAPPlatform-Import",
-        "file_patterns": ["*.pdf"],
-        "ignore_patterns": ["*.download", "*.crdownload", "*.tmp"],
+        "file_patterns": [
+          "*.pdf"
+        ],
+        "ignore_patterns": [
+          "*.download",
+          "*.crdownload",
+          "*.tmp"
+        ],
         "stability_check_seconds": 1.0,
         "stability_timeout_seconds": 60
       },
@@ -21,9 +29,17 @@
             "type": "command",
             "path": "cp",
             "enabled": true,
-            "args": ["{file_path}", "{base_folder}/{database}/EndNote/{filename}"],
-            "include_paths": ["Liberty.University/*"],
-            "exclude_paths": ["Liberty.University/Artificial Intelligence/*", "Liberty.University/Harvard Business Review/*"]
+            "args": [
+              "{file_path}",
+              "{base_folder}/{database}/EndNote/{filename}"
+            ],
+            "include_paths": [
+              "Liberty.University/*"
+            ],
+            "exclude_paths": [
+              "Liberty.University/Artificial Intelligence/*",
+              "Liberty.University/Harvard Business Review/*"
+            ]
           },
           {
             "name": "DEVONthink Import",
@@ -31,8 +47,13 @@
             "type": "applescript",
             "path": "scripts/devonthink_importer.scpt",
             "enabled": true,
-            "args": ["{file_path}", "{relative_path}"],
-            "include_paths": ["Liberty.University/*"]
+            "args": [
+              "{file_path}",
+              "{relative_path}"
+            ],
+            "include_paths": [
+              "Liberty.University/*"
+            ]
           },
           {
             "name": "Scholarly Assessment",
@@ -41,9 +62,18 @@
             "path": "uv run rap scholarly_assessment",
             "enabled": true,
             "cwd": "~/development/anthropics/projects/research_analysis_platform",
-            "args": ["{file_path}", "--headless", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/", "--log-level={log_level}"],
-            "include_paths": ["Liberty.University/*"],
-            "exclude_paths": ["Liberty.University/Harvard Business Review/*"]
+            "args": [
+              "{file_path}",
+              "--headless",
+              "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/",
+              "--log-level={log_level}"
+            ],
+            "include_paths": [
+              "Liberty.University/*"
+            ],
+            "exclude_paths": [
+              "Liberty.University/Harvard Business Review/*"
+            ]
           },
           {
             "name": "Harvard Business Review Assessment",
@@ -52,8 +82,15 @@
             "path": "uv run rap hbr_article_summary",
             "enabled": true,
             "cwd": "~/development/anthropics/projects/research_analysis_platform",
-            "args": ["{file_path}", "--headless", "--output-dir=~/RAP/RAPPlatform-Obsidian/{database}/{group_path}/", "--log-level={log_level}"],
-            "include_paths": ["Liberty.University/Harvard Business Review/*"]
+            "args": [
+              "{file_path}",
+              "--headless",
+              "--output-dir=~/RAP/RAPPlatform-Obsidian/{database}/{group_path}/",
+              "--log-level={log_level}"
+            ],
+            "include_paths": [
+              "Liberty.University/Harvard Business Review/*"
+            ]
           }
         ]
       }
@@ -63,8 +100,12 @@
       "enabled": true,
       "watch": {
         "base_folder": "~/RAP/RAPPlatform-Obsidian",
-        "file_patterns": ["*.md"],
-        "ignore_patterns": ["*.tmp"],
+        "file_patterns": [
+          "*.md"
+        ],
+        "ignore_patterns": [
+          "*.tmp"
+        ],
         "stability_check_seconds": 1.0,
         "stability_timeout_seconds": 60
       },
@@ -79,7 +120,33 @@
             "path": "uv run obsidian-frontmatter",
             "enabled": true,
             "cwd": "~/development/anthropics/projects/rap_obsidian_utils",
-            "args": ["{file_path}", "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/"]
+            "args": [
+              "{file_path}",
+              "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "Obsidian Sync for Study Architect",
+      "trigger": "manual",
+      "archive": false,
+      "watch": {
+        "base_folder": "/Users/darthjedi/development/anthropics/projects/study-architect/review/"
+      },
+      "pipeline": {
+        "scripts": [
+          {
+            "name": "Obsidian Sync",
+            "reqs": "Syncs the review files from the Claude Study Architect into Obsidian",
+            "type": "command",
+            "path": "uv run obsidian-sync",
+            "cwd": "~/development/anthropics/projects/rap_obsidian_utils",
+            "args": [
+              "{base_folder}",
+              "/Users/darthjedi/Obsidian/Leadership/Study Architect/"
+            ]
           }
         ]
       }

@@ -49,21 +49,24 @@ The RAP Framework Wiki contains user-facing documentation for this project:
 │  │  Watchdog   │───►│   Pipeline   │───►│  Script Executor  │   │
 │  │  Observer   │    │   Manager    │    │                   │   │
 │  └─────────────┘    └──────────────┘    └───────────────────┘   │
-│        │                   │                     │               │
-│        ▼                   ▼                     ▼               │
+│        │                   ▲                     │               │
+│        ▼                   │                     ▼               │
 │  ┌─────────────┐    ┌──────────────┐    ┌───────────────────┐   │
-│  │ File Events │    │ config.json  │    │ AppleScript/      │   │
-│  │ (*.pdf etc) │    │              │    │ Python scripts    │   │
+│  │ File Events │    │  Menu Bar    │    │ AppleScript/      │   │
+│  │ (auto mode) │    │ (manual mode)│    │ Python scripts    │   │
 │  └─────────────┘    └──────────────┘    └───────────────────┘   │
-│                                                   │               │
-│                                                   ▼               │
-│                                          ┌───────────────────┐   │
-│                                          │ devonthink_       │   │
-│                                          │ importer.scpt     │   │
-│                                          │ (OCR only)        │   │
-│                                          └───────────────────┘   │
+│                            │                     │               │
+│                            ▼                     ▼               │
+│                     ┌──────────────┐    ┌───────────────────┐   │
+│                     │ "Run Manual" │    │ devonthink_       │   │
+│                     │   submenu    │    │ importer.scpt     │   │
+│                     └──────────────┘    └───────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**Two trigger paths:**
+- **Auto mode:** Watchdog detects file changes → Pipeline processes file
+- **Manual mode:** Menu bar click → Pipeline runs with `{base_folder}` only
 
 ### Key Components
 
@@ -226,6 +229,50 @@ Files matching these patterns:
 - Are never deleted (even if `delete_on_success=true`)
 
 **Use case:** Staging folders where files are copied for other processes to handle via their own pipelines.
+
+### Watcher Trigger Modes
+
+Watchers support two trigger modes:
+
+| Mode | Behavior |
+|------|----------|
+| `auto` (default) | Watches for file changes via watchdog, processes files on startup |
+| `manual` | Only runs when clicked in menu bar "Run Manual" submenu |
+
+**Watcher-level configuration fields:**
+- `trigger` - Trigger mode: `"auto"` or `"manual"` (default: `"auto"`)
+- `archive` - Whether to archive files after processing (default: `true` for auto, `false` for manual)
+- `enabled` - Whether this watcher is active (default: `true`)
+
+**Manual watcher example:**
+
+```json
+{
+  "name": "Obsidian Sync",
+  "trigger": "manual",
+  "archive": false,
+  "watch": {
+    "base_folder": "~/RAP/SyncFolder"
+  },
+  "pipeline": {
+    "scripts": [
+      {
+        "name": "Sync Files",
+        "type": "command",
+        "path": "uv run obsidian-sync",
+        "cwd": "~/development/projects/rap_obsidian_utils",
+        "args": ["{base_folder}", "~/Obsidian/Destination/"]
+      }
+    ]
+  }
+}
+```
+
+**Manual watcher behavior:**
+- No file watching (no watchdog observer)
+- No startup processing
+- Appears in "Run Manual" submenu in menu bar
+- Scripts receive only `{base_folder}` and `{log_level}` variables (no file-specific variables)
 
 ### Config Schema
 

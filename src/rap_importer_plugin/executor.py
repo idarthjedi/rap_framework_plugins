@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from .logging_config import get_logger
 
 if TYPE_CHECKING:
-    from .config import ScriptConfig
+    from .config import ScriptConfig, WatchConfig
 
 logger = get_logger("executor")
 
@@ -106,6 +106,45 @@ class FileVariables:
             "filename": self.filename,
             "database": self.database,
             "group_path": self.group_path,
+            "base_folder": self.base_folder,
+            "log_level": self.log_level,
+        }
+
+
+@dataclass
+class ManualVariables:
+    """Variables available for manual trigger script argument substitution.
+
+    Unlike FileVariables, these don't require a specific file - just the base folder.
+    Used for manual trigger watchers that run commands on the folder as a whole.
+    """
+
+    base_folder: str  # Base watch folder path
+    log_level: str = "INFO"  # Current log level from config
+
+    @classmethod
+    def from_watch_config(
+        cls,
+        watch_config: "WatchConfig",
+        log_level: str = "INFO",
+    ) -> "ManualVariables":
+        """Create variables from a watch configuration.
+
+        Args:
+            watch_config: Watch configuration with base_folder
+            log_level: Current log level from config
+
+        Returns:
+            ManualVariables with computed values
+        """
+        return cls(
+            base_folder=str(watch_config.expanded_base_folder),
+            log_level=log_level,
+        )
+
+    def as_dict(self) -> dict[str, str]:
+        """Return variables as a dictionary for substitution."""
+        return {
             "base_folder": self.base_folder,
             "log_level": self.log_level,
         }
