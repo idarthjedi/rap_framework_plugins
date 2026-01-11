@@ -103,6 +103,13 @@ class RAPImporterMenuBar(rumps.App):
                 item = rumps.MenuItem(instance.name, callback=callback)
                 self.manual_submenu.add(item)
 
+        # Open Directory submenu (for all watchers)
+        self.open_dir_submenu = rumps.MenuItem("Open Directory")
+        for instance in self.watcher_instances:
+            callback = self._create_open_directory_callback(instance)
+            item = rumps.MenuItem(instance.name, callback=callback)
+            self.open_dir_submenu.add(item)
+
         # Retry failed files
         self.retry_item = rumps.MenuItem("Retry - 0", callback=self._retry)
 
@@ -127,6 +134,9 @@ class RAPImporterMenuBar(rumps.App):
         # Add Run Manual submenu if there are manual watchers
         if self.manual_submenu:
             menu_items.append(self.manual_submenu)
+
+        # Add Open Directory submenu
+        menu_items.append(self.open_dir_submenu)
 
         menu_items.extend([
             self.retry_item,
@@ -236,6 +246,32 @@ class RAPImporterMenuBar(rumps.App):
 
         thread = threading.Thread(target=do_manual, daemon=True)
         thread.start()
+
+    def _create_open_directory_callback(self, instance: WatcherInstance) -> Callable:
+        """Create a callback function to open a watcher's base folder in Finder.
+
+        Args:
+            instance: The watcher instance whose folder to open
+
+        Returns:
+            Callback function for rumps MenuItem
+        """
+        def callback(_sender: rumps.MenuItem) -> None:
+            self._open_directory(instance)
+        return callback
+
+    def _open_directory(self, instance: WatcherInstance) -> None:
+        """Open a watcher's base folder in Finder.
+
+        Args:
+            instance: The watcher instance whose folder to open
+        """
+        folder_path = instance.config.watch.expanded_base_folder
+        logger.debug(f"Opening directory: {folder_path}")
+        try:
+            subprocess.run(["open", str(folder_path)], check=True)
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Failed to open directory {folder_path}: {e}")
 
     def _retry(self, _sender: rumps.MenuItem) -> None:
         """Retry all failed files by re-dispatching to normal processing flow."""
