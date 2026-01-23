@@ -9,6 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
+# Environment files (machine-specific paths)
+.env
+.env.local
+config/.env
+
 # IDE
 .idea/
 /scripts/migrate_sha1_to_sha256.py

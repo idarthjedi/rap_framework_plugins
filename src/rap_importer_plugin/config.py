@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import jsonschema
+
+from .paths import expand_path
 
 
 @dataclass
@@ -25,8 +26,8 @@ class WatchConfig:
 
     @property
     def expanded_base_folder(self) -> Path:
-        """Return base folder with ~ expanded."""
-        return Path(os.path.expanduser(self.base_folder))
+        """Return base folder with ~ and ${VAR} expanded."""
+        return Path(expand_path(self.base_folder))
 
 
 @dataclass
@@ -76,8 +77,8 @@ class LoggingConfig:
 
     @property
     def expanded_file(self) -> Path:
-        """Return log file path with ~ expanded."""
-        return Path(os.path.expanduser(self.file))
+        """Return log file path with ~ and ${VAR} expanded."""
+        return Path(expand_path(self.file))
 
     def __post_init__(self) -> None:
         valid_levels = ("TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")

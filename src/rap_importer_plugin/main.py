@@ -36,6 +36,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dotenv import load_dotenv
+
 # Lock file to ensure single instance
 LOCK_FILE = Path.home() / ".rap-importer.lock"
 _lock_file_handle = None  # Keep reference to prevent garbage collection
@@ -180,6 +182,13 @@ def main() -> int:
             config_path = args.config_path
         else:
             config_path = find_config_file()
+
+        # Load .env from config directory before parsing config
+        # This allows ${VAR} in config.json to be expanded
+        env_file = config_path.parent / ".env"
+        if env_file.exists():
+            load_dotenv(env_file)
+
         config = load_config(config_path)
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)

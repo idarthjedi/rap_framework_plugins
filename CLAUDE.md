@@ -113,7 +113,10 @@ osacompile -o scripts/devonthink_importer.scpt scripts/devonthink_importer.apple
 ```
 rap_importer_plugin/
 ├── config/
-│   └── config.json             # Runtime configuration
+│   ├── config.json             # Runtime configuration
+│   ├── config.schema.json      # JSON Schema for validation
+│   ├── .env                    # Machine-specific paths (gitignored)
+│   └── .env.example            # Template for .env
 ├── main.py                     # CLI entry point
 ├── src/rap_importer_plugin/   # Python package
 │   ├── cli.py                 # Argument parsing
@@ -123,6 +126,7 @@ rap_importer_plugin/
 │   ├── main.py                # Main app logic
 │   ├── menubar.py             # macOS menu bar
 │   ├── notifications.py       # macOS notifications
+│   ├── paths.py               # Path expansion utilities
 │   ├── pipeline.py            # Pipeline management
 │   └── watcher.py             # File watching
 ├── scripts/
@@ -131,6 +135,39 @@ rap_importer_plugin/
 ├── docs/                       # Historical plan documents (atomic, read-only)
 └── tests/                      # Test suite
 ```
+
+### Environment Variables (.env)
+
+Machine-specific paths are stored in `config/.env` (gitignored) to improve portability:
+
+```bash
+# Copy template and customize for your machine
+cp config/.env.example config/.env
+```
+
+**Available variables:**
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `RAP_BASE` | RAP platform data root | `~/RAP` |
+| `DEV_BASE` | Development projects root | `~/development/anthropics/projects` |
+| `OBSIDIAN_BASE` | Obsidian vault root | `~/Obsidian/Leadership` |
+
+**Usage in config.json:**
+
+```json
+{
+  "base_folder": "${RAP_BASE}/RAPPlatform-Import/",
+  "cwd": "${DEV_BASE}/research_analysis_platform",
+  "args": ["--output-dir=${OBSIDIAN_BASE}/Slip-Box/"]
+}
+```
+
+**Expansion behavior:**
+- `${VAR}` is expanded from environment variables
+- `~` is expanded to home directory
+- Undefined variables are left unchanged (path validation catches errors)
+- Backwards compatible: absolute paths and `~` paths still work
 
 ### Adding Pipeline Scripts
 
@@ -166,6 +203,8 @@ Variable substitution in args:
 - `{group_path}` - Path between database and filename
 - `{base_folder}` - The watch folder base path
 - `{log_level}` - Current log level (DEBUG, INFO, etc.)
+- `${VAR}` - Environment variable (from `.env` or system)
+- `~` - Home directory expansion
 
 ### Path Filtering
 
@@ -339,6 +378,7 @@ Called via: `osascript devonthink_importer.scpt "/full/path" "Database/Group/fil
 |---------|---------|
 | watchdog | File system event monitoring |
 | rumps | macOS menu bar apps |
+| python-dotenv | Environment variable loading from `.env` |
 | DEVONthink Pro | Document management (bundle ID: `DNtp`) |
 
 ## Documentation Conventions

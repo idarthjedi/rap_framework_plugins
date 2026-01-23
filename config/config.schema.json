@@ -68,7 +68,7 @@
       "properties": {
         "base_folder": {
           "type": "string",
-          "description": "Base folder to watch (supports ~ expansion)"
+          "description": "Base folder to watch (supports ~ and ${VAR} expansion)"
         },
         "file_patterns": {
           "type": "array",
@@ -154,12 +154,12 @@
           "oneOf": [
             {
               "type": "array",
-              "description": "Arguments as list with variable substitution",
+              "description": "Arguments as list with {var} substitution and ${VAR} env expansion",
               "items": { "type": "string" }
             },
             {
               "type": "object",
-              "description": "Arguments as key-value pairs",
+              "description": "Arguments as key-value pairs with {var} substitution and ${VAR} env expansion",
               "additionalProperties": { "type": "string" }
             }
           ],
@@ -167,7 +167,7 @@
         },
         "cwd": {
           "type": ["string", "null"],
-          "description": "Working directory for command type (supports ~ expansion)",
+          "description": "Working directory for command type (supports ~ and ${VAR} expansion)",
           "default": null
         },
         "include_paths": {
@@ -196,7 +196,7 @@
         },
         "file": {
           "type": "string",
-          "description": "Log file path (supports ~ expansion)",
+          "description": "Log file path (supports ~ and ${VAR} expansion)",
           "default": "~/Library/Logs/rap-importer.log"
         },
         "max_bytes": {

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .logging_config import get_logger
+from .paths import expand_path
 
 if TYPE_CHECKING:
     from .config import ScriptConfig, WatchConfig
@@ -402,13 +403,13 @@ class ScriptExecutor:
         else:
             cmd.extend(args)
 
-        # Expand ~ in all command parts that look like paths
-        cmd = [os.path.expanduser(part) if part.startswith("~") else part for part in cmd]
+        # Expand ~ and ${VAR} in all command parts that look like paths
+        cmd = [expand_path(part) if part.startswith("~") or "${" in part else part for part in cmd]
 
         # Resolve working directory
         resolved_cwd: str | None = None
         if cwd:
-            resolved_cwd = os.path.expanduser(cwd)
+            resolved_cwd = expand_path(cwd)
             if not os.path.isdir(resolved_cwd):
                 return ExecutionResult(
                     success=False,

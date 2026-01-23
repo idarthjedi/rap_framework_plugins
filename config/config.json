@@ -7,7 +7,7 @@
         "*/EndNote/*"
       ],
       "watch": {
-        "base_folder": "~/RAP/RAPPlatform-Import",
+        "base_folder": "${RAP_BASE}/RAPPlatform-Import/",
         "file_patterns": [
           "*.pdf"
         ],
@@ -61,11 +61,11 @@
             "type": "command",
             "path": "uv run rap scholarly_assessment",
             "enabled": true,
-            "cwd": "~/development/anthropics/projects/research_analysis_platform",
+            "cwd": "${DEV_BASE}/research_analysis_platform",
             "args": [
               "{file_path}",
               "--headless",
-              "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/",
+              "--output-dir=${OBSIDIAN_BASE}/Slip-Box/01-rap-inbox/{group_path}/",
               "--log-level={log_level}"
             ],
             "include_paths": [
@@ -81,11 +81,11 @@
             "type": "command",
             "path": "uv run rap hbr_article_summary",
             "enabled": true,
-            "cwd": "~/development/anthropics/projects/research_analysis_platform",
+            "cwd": "${DEV_BASE}/research_analysis_platform",
             "args": [
               "{file_path}",
               "--headless",
-              "--output-dir=~/RAP/RAPPlatform-Obsidian/{database}/{group_path}/",
+              "--output-dir=${RAP_BASE}/RAPPlatform-Obsidian/{database}/{group_path}/",
               "--log-level={log_level}"
             ],
             "include_paths": [
@@ -99,7 +99,7 @@
       "name": "Obsidian Transformer",
       "enabled": true,
       "watch": {
-        "base_folder": "~/RAP/RAPPlatform-Obsidian",
+        "base_folder": "${RAP_BASE}/RAPPlatform-Obsidian/",
         "file_patterns": [
           "*.md"
         ],
@@ -119,10 +119,10 @@
             "type": "command",
             "path": "uv run obsidian-frontmatter",
             "enabled": true,
-            "cwd": "~/development/anthropics/projects/rap_obsidian_utils",
+            "cwd": "${DEV_BASE}/rap_obsidian_utils",
             "args": [
               "{file_path}",
-              "--output-dir=~/Obsidian/Leadership/Slip-Box/01-rap-inbox/{group_path}/"
+              "--output-dir=${OBSIDIAN_BASE}/Slip-Box/01-rap-inbox/{group_path}/"
             ]
           }
         ]
@@ -133,7 +133,7 @@
       "trigger": "manual",
       "archive": false,
       "watch": {
-        "base_folder": "/Users/darthjedi/development/anthropics/projects/study-architect/review/"
+        "base_folder": "${DEV_BASE}/study-architect/review/"
       },
       "pipeline": {
         "scripts": [
@@ -142,10 +142,10 @@
             "reqs": "Syncs the review files from the Claude Study Architect into Obsidian",
             "type": "command",
             "path": "uv run obsidian-sync",
-            "cwd": "~/development/anthropics/projects/rap_obsidian_utils",
+            "cwd": "${DEV_BASE}/rap_obsidian_utils",
             "args": [
               "{base_folder}",
-              "/Users/darthjedi/Obsidian/Leadership/Study Architect/"
+              "${OBSIDIAN_BASE}/Study Architect/"
             ]
           }
         ]
