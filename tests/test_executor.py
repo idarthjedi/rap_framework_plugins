@@ -557,3 +557,34 @@ print(f"file={sys.argv[2]}")
         assert result.success is False
         assert "nonexistent" in result.error
         assert "Available variables" in result.error
+
+    def test_execute_command_env_var_with_runtime_var(self, tmp_path: Path, monkeypatch) -> None:
+        """Should expand ${VAR} before {var} substitution to avoid conflicts.
+
+        This tests the fix for the bug where ${OBSIDIAN_BASE} was being
+        interpreted as {OBSIDIAN_BASE} by Python's .format() method.
+        """
+        # Set up an env var that will be expanded
+        monkeypatch.setenv("TEST_OUTPUT_BASE", "/test/output")
+
+        executor = ScriptExecutor(tmp_path)
+        script = ScriptConfig(
+            name="test",
+            type="command",
+            path="echo",
+            # Mix ${VAR} and {var} in the same argument
+            args=["${TEST_OUTPUT_BASE}/{group_path}/"]
+        )
+        vars = FileVariables(
+            file_path="/test/file.pdf",
+            relative_path="DB/Folder/file.pdf",
+            filename="file.pdf",
+            database="DB",
+            group_path="Folder"
+        )
+
+        result = executor.execute(script, vars)
+
+        assert result.success is True
+        # ${TEST_OUTPUT_BASE} should be expanded, then {group_path} substituted
+        assert "/test/output/Folder/" in result.output

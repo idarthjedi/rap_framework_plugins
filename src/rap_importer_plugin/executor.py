@@ -256,6 +256,10 @@ class ScriptExecutor:
         Raises:
             ValueError: If an unknown variable is referenced
         """
+        # First expand ${VAR} env vars (must happen before .format() which
+        # would interpret {VAR} inside ${VAR} as a runtime placeholder)
+        value = expand_path(value)
+
         available_vars = ", ".join(f"{{{k}}}" for k in sorted(var_dict.keys()))
         try:
             return value.format(**var_dict)
@@ -287,6 +291,9 @@ class ScriptExecutor:
         available_vars = ", ".join(f"{{{k}}}" for k in sorted(var_dict.keys()))
 
         def substitute(value: str) -> str:
+            # First expand ${VAR} env vars (must happen before .format() which
+            # would interpret {VAR} inside ${VAR} as a runtime placeholder)
+            value = expand_path(value)
             try:
                 return value.format(**var_dict)
             except KeyError as e:
