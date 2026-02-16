@@ -217,7 +217,9 @@ class PipelineManager:
         for i, script in enumerate(scripts, 1):
             logger.debug(f"Running script {i}/{len(scripts)}: {script.name}")
 
-            result = self.executor.execute(script, variables)
+            result = self.executor.execute(
+                script, variables, **({"timeout": script.timeout} if script.timeout else {})
+            )
 
             # Log script execution time
             duration_sec = result.duration_ms / 1000
@@ -462,7 +464,9 @@ class PipelineManager:
         for i, script in enumerate(scripts, 1):
             logger.debug(f"Running script {i}/{len(scripts)}: {script.name}")
 
-            result = self.executor.execute(script, variables)
+            result = self.executor.execute(
+                script, variables, **({"timeout": script.timeout} if script.timeout else {})
+            )
 
             # Log script execution time
             duration_sec = result.duration_ms / 1000

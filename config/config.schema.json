@@ -181,6 +181,11 @@
           "description": "fnmatch patterns - skip matching paths (takes precedence)",
           "items": { "type": "string" },
           "default": []
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Maximum execution time in seconds (default: 300)",
+          "minimum": 1
         }
       }
     },

@@ -43,6 +43,7 @@ class ScriptConfig:
     cwd: str | None = None  # Optional working directory (supports ~ expansion)
     include_paths: list[str] = field(default_factory=list)  # fnmatch patterns to include
     exclude_paths: list[str] = field(default_factory=list)  # fnmatch patterns to exclude
+    timeout: int | None = None  # Optional per-script timeout in seconds
 
     def __post_init__(self) -> None:
         if self.type not in ("applescript", "python", "command"):
@@ -177,6 +178,7 @@ def _parse_script_config(data: dict[str, Any]) -> ScriptConfig:
         cwd=data.get("cwd"),
         include_paths=data.get("include_paths", []),
         exclude_paths=data.get("exclude_paths", []),
+        timeout=data.get("timeout"),
     )
 
 

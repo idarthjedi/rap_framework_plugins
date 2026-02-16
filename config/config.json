@@ -61,6 +61,7 @@
             "type": "command",
             "path": "uv run rap scholarly_assessment",
             "enabled": true,
+            "timeout": 600,
             "cwd": "${DEV_BASE}/research_analysis_platform",
             "args": [
               "{file_path}",
