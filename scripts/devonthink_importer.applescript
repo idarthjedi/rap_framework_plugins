@@ -15,6 +15,7 @@
 -- Returns:
 --   "success"    - New file imported via OCR
 --   "imported"   - New file imported without OCR (skipped, or OCR timed out)
+--   "recovered"  - Adopted a record left unstamped by an earlier failed run
 --   "replicated" - Existing record replicated (duplicate detected)
 --   Throws error on failure
 --
@@ -59,6 +60,13 @@ on run argv
 		set ocrTimeout to defaultOCRTimeout
 	end if
 
+	-- Filename as it appears on disk. Used to recognise a record that an earlier
+	-- run created but never stamped -- see findOrphan.
+	set AppleScript's text item delimiters to "/"
+	set relParts to text items of relativePath
+	set AppleScript's text item delimiters to ""
+	set sourceFilename to item -1 of relParts
+
 	-- Parse relative path for database and group info
 	set pathInfo to my parsePathComponents(relativePath)
 	set dbName to databaseName of pathInfo
@@ -94,10 +102,23 @@ on run argv
 		my logTiming("replicate", replicateStart, replicateEnd)
 		return "replicated"
 	else
+		-- No stamped duplicate. Before creating anything, check whether an earlier
+		-- run already created this record and died before stamping it. Without this
+		-- check a retry re-OCRs the file and leaves a second copy behind.
+		set orphanRecord to my findOrphan(sourceFilename, destGroup, searchTimeout)
+		if orphanRecord is not missing value then
+			tell application id "DNtp"
+				add custom meta data fileHash for "sourceHash" to orphanRecord
+			end tell
+			log "Adopted unstamped record left by an earlier run: " & sourceFilename
+			return "recovered"
+		end if
+
 		-- No duplicate: OCR and import (with timing)
 		set ocrStart to my getMilliseconds()
 		set theRecord to missing value
 		set usedOCR to false
+		set adopted to false
 
 		if my needsOCR(filePath) then
 			-- Try OCR, but never let a wedged engine take the pipeline down with it.
@@ -122,9 +143,18 @@ on run argv
 		end if
 
 		if theRecord is missing value then
-			tell application id "DNtp"
-				set theRecord to import filePath to destGroup
-			end tell
+			-- -1712 means DEVONthink stopped replying, NOT that it stopped working.
+			-- If the OCR landed after we gave up waiting, the record already exists
+			-- and importing now would create a second copy.
+			set theRecord to my findOrphan(sourceFilename, destGroup, searchTimeout)
+			if theRecord is not missing value then
+				set adopted to true
+				log "Adopted record created by a late-completing OCR"
+			else
+				tell application id "DNtp"
+					set theRecord to import filePath to destGroup
+				end tell
+			end if
 		end if
 
 		set wordTotal to 0
@@ -153,7 +183,9 @@ on run argv
 			error "Imported but NOT searchable (no text layer, OCR unavailable): " & filePath number 1008
 		end if
 
-		if usedOCR then
+		if adopted then
+			return "recovered"
+		else if usedOCR then
 			return "success"
 		else
 			return "imported"
@@ -268,6 +300,37 @@ on findRecordByHash(fileHash, theDatabase, searchTimeoutSeconds)
 		end tell
 	end timeout
 end findRecordByHash
+
+on findOrphan(sourceFilename, destGroup, timeoutSeconds)
+	-- Find a record in destGroup that matches this file but carries no sourceHash.
+	--
+	-- That combination is the signature of a run that created the record and then
+	-- died before stamping it -- the Apple Event timed out mid-import, the process
+	-- was killed, or OCR completed after the script had stopped waiting. Such a
+	-- record is invisible to the hash search, so without adopting it every retry
+	-- would OCR the file again and leave another copy behind.
+	--
+	-- Matches on "filename", not "name": DEVONthink strips the extension from name,
+	-- and smart rules are far more likely to rewrite name than filename.
+	with timeout of timeoutSeconds seconds
+		tell application id "DNtp"
+			try
+				repeat with r in (children of destGroup)
+					if (filename of r) is sourceFilename then
+						if (get custom meta data for "sourceHash" from r) is missing value then
+							return r
+						end if
+					end if
+				end repeat
+			on error
+				-- Any lookup failure means "no orphan found". The caller then imports,
+				-- which is the safe direction: a duplicate beats a lost document.
+				return missing value
+			end try
+		end tell
+	end timeout
+	return missing value
+end findOrphan
 
 -- ===================
 -- PATH PARSING
