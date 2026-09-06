@@ -49,11 +49,13 @@
             "enabled": true,
             "args": [
               "{file_path}",
-              "{relative_path}"
+              "{relative_path}",
+              "300"
             ],
             "include_paths": [
               "Liberty.University/*"
-            ]
+            ],
+            "timeout": 600
           },
           {
             "name": "Scholarly Assessment",
