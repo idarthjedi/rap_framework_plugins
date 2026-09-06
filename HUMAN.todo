@@ -1,0 +1,5 @@
+# Claude should ignore this file
+
+## Tomorrow
+
+Update: Once the hashes are synced, just like we cache MD files, and we skip reimporting and OCR of files in DEVONThink based on their hash already existing, we should also search in Obsidian and if we find a file with the same hash, skip the whole RAP step.
