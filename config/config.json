@@ -46,6 +46,22 @@
             "reqs": "DEVONthink 4 (tested) must be running",
             "type": "applescript",
             "path": "scripts/devonthink_importer.scpt",
+            "enabled": false,
+            "args": [
+              "{file_path}",
+              "{relative_path}",
+              "300"
+            ],
+            "include_paths": [
+              "Liberty.University/*"
+            ],
+            "timeout": 600
+          },
+          {
+            "name": "DEVONthink Import (MCP)",
+            "reqs": "DEVONthink 4 with its bundled MCP server. Alternative to the AppleScript entry above: enable exactly one of the two.",
+            "type": "python",
+            "path": "scripts/devonthink_importer.py",
             "enabled": true,
             "args": [
               "{file_path}",
