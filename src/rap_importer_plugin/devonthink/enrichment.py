@@ -55,7 +55,7 @@ def enrich_record(
             "get_record_properties", {"uuid": uuid, "database_uuid": database_uuid}
         )
     except MCPError as e:
-        report(f"WARNING: skipped bibliographic enrichment, could not read record: {e}")
+        report(f"Bibliographic enrichment skipped; could not read record: {e}")
         return None
 
     custom = props.get("customMetadata") or {}
@@ -82,7 +82,7 @@ def enrich_record(
             report(f"Enriched from ISBN {isbn}")
             return "isbn"
     except MCPError as e:
-        report(f"WARNING: bibliographic enrichment failed, continuing: {e}")
+        report(f"Bibliographic enrichment failed ({e}); continuing")
         return None
 
     report("No DOI or ISBN detected; bibliographic enrichment skipped")

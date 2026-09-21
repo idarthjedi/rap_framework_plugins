@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -15,162 +14,24 @@ from rap_importer_plugin.devonthink.errors import ImporterError
 from rap_importer_plugin.devonthink.importer import (
     DevonthinkImporter,
     Hit,
-    Plan,
-    decide_existing,
+    ImportResult,
+    choose_existing,
+    identity_problem,
     needs_ocr,
     parse_path_components,
+    result_lines,
     sha256_file,
 )
-from rap_importer_plugin.devonthink.mcp_client import MCPTimeout, MCPToolError
+from rap_importer_plugin.devonthink.mcp_client import MCPToolError
+from rap_importer_plugin.devonthink.pdf_info import PdfInfo
+
+from .devonthink_fake import FakeDevonthink
 
 RAP_PROJECT = Path.home() / "development/anthropics/projects/research_analysis_platform"
 
 SCANNED = (1, 0, 0)  # pdf_text_stats output for an image-only page
-BORN_DIGITAL = (2, 10044, 5022)
-
-
-class FakeDevonthink:
-    """In-memory stand-in for the DEVONthink MCP tools the importer calls.
-
-    Mirrors behaviour measured against the real server: ocr_record makes a NEW
-    record (different bytes, custom metadata copied) and leaves the original;
-    trashed records drop out of search; an un-OCR'd image PDF still reports a
-    few words from DEVONthink's light text recognition.
-    """
-
-    def __init__(self, tmp_path: Path) -> None:
-        self.store = tmp_path / "Files.noindex"
-        self.store.mkdir()
-        self.database = {
-            "uuid": "DB",
-            "name": "Liberty.University",
-            "rootUUID": "DB",
-            "incomingGroupUUID": "INBOX",
-        }
-        self.groups: dict[str, str] = {"/": "DB", "/Inbox": "INBOX"}  # location -> uuid
-        self.group_props = {"INBOX": {"location": "/", "name": "Inbox"}}
-        self.records: dict[str, dict[str, Any]] = {}
-        self.calls: list[tuple[str, dict[str, Any]]] = []
-        self.ocr_behaviour = "ok"
-        self.raw_word_count = 4
-        self._next = 0
-
-    # -- helpers for arranging state --
-
-    def add_record(
-        self, source: Path, group: str, *, stamp: str | None, processed: bool, added: str = "2026-01-01"
-    ) -> str:
-        uuid = self._uuid()
-        path = self.store / f"{uuid}.pdf"
-        data = source.read_bytes() + (b"%OCR-TEXT-LAYER" if processed else b"")
-        path.write_bytes(data)
-        self.records[uuid] = {
-            "path": path,
-            "parents": {group},
-            "meta": {"sourcehash": stamp} if stamp else {},
-            "words": 18 if processed else self.raw_word_count,
-            "trashed": False,
-            "added": added,
-        }
-        return uuid
-
-    def live(self) -> dict[str, dict[str, Any]]:
-        return {u: r for u, r in self.records.items() if not r["trashed"]}
-
-    def called(self, tool: str) -> list[dict[str, Any]]:
-        return [args for name, args in self.calls if name == tool]
-
-    def _uuid(self) -> str:
-        self._next += 1
-        return f"REC{self._next}"
-
-    # -- the MCP surface --
-
-    def call_tool(self, name: str, arguments: dict[str, Any] | None = None, timeout: float | None = None) -> Any:
-        args = arguments or {}
-        self.calls.append((name, args))
-        return getattr(self, f"_{name}")(**args)
-
-    def _get_databases(self) -> list[dict[str, Any]]:
-        return [self.database]
-
-    def _create_group_path(self, location: str, database_uuid: str) -> dict[str, Any]:
-        key = "/" + location.strip("/")
-        self.groups.setdefault(key, f"GRP{len(self.groups)}")
-        return {"uuid": self.groups[key]}
-
-    def _get_record_properties(self, uuid: str, database_uuid: str | None = None) -> dict[str, Any]:
-        if uuid in self.group_props:
-            return self.group_props[uuid]
-        rec = self.records[uuid]
-        props = {"uuid": uuid, "wordCount": rec["words"], "customMetadata": dict(rec["meta"])}
-        if "doi" in rec:
-            props["doi"] = rec["doi"]
-        return props
-
-    def _import_file(self, path: str, database_uuid: str, destination: str) -> dict[str, Any]:
-        uuid = self._uuid()
-        copy = self.store / f"{uuid}.pdf"
-        shutil.copyfile(path, copy)
-        self.records[uuid] = {
-            "path": copy, "parents": {destination}, "meta": {},
-            "words": self.raw_word_count, "trashed": False, "added": "2026-09-21",
-        }
-        return {"uuid": uuid}
-
-    def _set_record_custom_metadata(self, uuid: str, metadata: dict[str, Any], mode: str = "replace") -> dict[str, Any]:
-        rec = self.records[uuid]
-        rec["meta"] = {**rec["meta"], **metadata} if mode == "merge" else dict(metadata)
-        return {"uuid": uuid, "metadata": dict(rec["meta"]), "dropped_fields": []}
-
-    def _get_record_custom_metadata(self, uuid: str, database_uuid: str | None = None) -> dict[str, Any]:
-        return dict(self.records[uuid]["meta"])
-
-    def _search_records(self, query: str, database_uuid: str, fields: list[str]) -> dict[str, Any]:
-        wanted = query.removeprefix("mdsourcehash:")
-        hits = [
-            {"uuid": u, "additionDate": r["added"]}
-            for u, r in self.live().items()
-            if r["meta"].get("sourcehash") == wanted
-        ]
-        return {"results": hits, "total": len(hits)}
-
-    def _get_imported_record_path(self, uuids: list[str], database_uuid: str) -> dict[str, Any]:
-        return {"results": [
-            {"uuid": u, "path": str(self.records[u]["path"]), "indexed": False} for u in uuids
-        ]}
-
-    def _get_record_parents(self, uuids: list[str], database_uuid: str) -> dict[str, Any]:
-        return {"results": [
-            {"uuid": u, "parents": [{"uuid": g} for g in self.records[u]["parents"]]} for u in uuids
-        ]}
-
-    def _ocr_record(self, uuid: str) -> dict[str, Any]:
-        if self.ocr_behaviour == "timeout":
-            raise MCPTimeout("No reply within 300s")
-        if self.ocr_behaviour == "error":
-            raise MCPToolError("ocr_record: OCR returned no result")
-        original = self.records[uuid]
-        new = self._uuid()
-        path = self.store / f"{new}.pdf"
-        path.write_bytes(original["path"].read_bytes() + b"%OCR-TEXT-LAYER")
-        self.records[new] = {
-            "path": path, "parents": set(original["parents"]), "meta": dict(original["meta"]),
-            "words": 18, "trashed": False, "added": "2026-09-21",
-        }
-        return {"uuid": new}
-
-    def _trash_record(self, uuid: str, database_uuid: str) -> str:
-        self.records[uuid]["trashed"] = True
-        return "Record moved to trash"
-
-    def _replicate_record(self, uuid: str, destination: str, database_uuid: str) -> dict[str, Any]:
-        self.records[uuid]["parents"].add(destination)
-        return {"uuid": uuid, "destination_uuid": destination}
-
-    def _resolve_doi_metadata(self, uuid: str, database_uuid: str, doi: str, rename: bool, **_: Any) -> dict[str, Any]:
-        self.records[uuid]["meta"].update({"doi": doi, "journal": "Personnel Psychology"})
-        return {"record_enriched": True}
+BORN_DIGITAL = (1, 5022, 5022)
+ENCRYPTED = (1, 0, 0)  # encrypted content streams read as no text
 
 
 @pytest.fixture
@@ -185,11 +46,19 @@ def pdf(tmp_path: Path) -> Path:
     return source
 
 
-def make_importer(dt: FakeDevonthink, stats: tuple[int, int, int], **kwargs: Any) -> tuple[DevonthinkImporter, list[str]]:
+def make_importer(
+    dt: FakeDevonthink,
+    stats: tuple[int, int, int],
+    *,
+    pages: int = 1,
+    encrypted: bool = False,
+    **kwargs: Any,
+) -> tuple[DevonthinkImporter, list[str]]:
     reported: list[str] = []
     importer = DevonthinkImporter(
         dt,  # type: ignore[arg-type]  # duck-typed MCP client
         text_stats=lambda _path: stats,
+        inspect_pdf=lambda _path: PdfInfo(pages=pages, encrypted=encrypted),
         report=reported.append,
         **kwargs,
     )
@@ -279,96 +148,176 @@ class TestHashContract:
         assert exc.value.code == errors.HASH_FAILED
 
 
-def hit(uuid: str, *, raw: bool, in_dest: bool = True, added: str = "2026-01-01") -> Hit:
-    return Hit(uuid=uuid, raw=raw, in_dest=in_dest, added=added)
+def props(**overrides: Any) -> dict[str, Any]:
+    base = {"type": "pdf", "kind": "PDF+Text", "pageCount": 6, "customMetadata": {"sourcehash": "h" * 64}}
+    return {**base, **overrides}
 
 
-class TestDecideExisting:
-    """The reconciliation table in decide_existing's docstring."""
+class TestIdentityProblem:
+    """A hash match must also prove it is the same document."""
 
-    def test_processed_hit_already_filed(self) -> None:
-        """Re-running a finished import changes nothing."""
-        plan = decide_existing([hit("P", raw=False)], ocr_wanted=True)
-        assert plan.keep == "P" and plan.ocr is None
-        assert plan.trash == ()
-        assert plan.status == "replicated"
+    def test_verified(self) -> None:
+        assert identity_problem(props(), "h" * 64, 6) == ""
 
-    def test_crash_after_ocr_before_trash(self) -> None:
-        """A raw leftover beside its OCR'd copy is trashed; the OCR'd copy is kept."""
-        plan = decide_existing([hit("R", raw=True), hit("P", raw=False)], ocr_wanted=True)
-        assert plan.keep == "P" and plan.ocr is None
-        assert set(plan.trash) == {"R"}
-        assert plan.status == "recovered"
+    def test_stamp_must_match_exactly(self) -> None:
+        """Should not trust the search operator: a longer stamp is not a match."""
+        p = props(customMetadata={"sourcehash": "h" * 64 + "0"})
+        assert "sourcehash differs" in identity_problem(p, "h" * 64, 6)
 
-    def test_crash_before_ocr(self) -> None:
-        """A lone raw record is OCR'd, then trashed."""
-        plan = decide_existing([hit("R", raw=True)], ocr_wanted=True)
-        assert plan.ocr == "R" and plan.keep is None
-        assert set(plan.trash) == {"R"}
-        assert plan.status == "recovered"
+    def test_missing_stamp(self) -> None:
+        assert "sourcehash differs" in identity_problem(props(customMetadata={}), "h" * 64, 6)
 
-    def test_several_raw_leftovers(self) -> None:
-        """One raw record is OCR'd and every raw copy is trashed."""
-        plan = decide_existing([hit("R1", raw=True), hit("R2", raw=True)], ocr_wanted=True)
-        assert plan.ocr in {"R1", "R2"}
-        assert set(plan.trash) == {"R1", "R2"}
+    def test_must_be_a_pdf(self) -> None:
+        """A converted or derived record can inherit the stamp without being the document."""
+        assert "not a PDF" in identity_problem(props(type="markdown", kind="Markdown"), "h" * 64, 6)
 
-    def test_born_digital_duplicate(self) -> None:
-        """Without OCR, a raw record is a finished import: keep it, trash nothing."""
-        plan = decide_existing([hit("R", raw=True, in_dest=False)], ocr_wanted=False)
-        assert plan.keep == "R" and plan.ocr is None
-        assert plan.trash == ()
-        assert plan.status == "replicated"
+    def test_page_count_must_agree(self) -> None:
+        assert identity_problem(props(pageCount=9), "h" * 64, 6) == "its page count differs (9 vs 6)"
 
-    def test_never_trashes_processed_records(self) -> None:
-        """Processed records -- OCR'd or annotated -- are never trash candidates."""
-        hits = [hit("P1", raw=False), hit("P2", raw=False, in_dest=False), hit("R", raw=True)]
-        for ocr_wanted in (True, False):
-            plan = decide_existing(hits, ocr_wanted)
-            assert not {"P1", "P2"} & set(plan.trash)
-            assert plan.keep in {"P1", "P2", "R", None}
+    def test_unknown_incoming_page_count(self) -> None:
+        assert "could not be read" in identity_problem(props(), "h" * 64, 0)
+
+    def test_unknown_record_page_count(self) -> None:
+        assert "unknown" in identity_problem(props(pageCount=0), "h" * 64, 6)
 
 
-class TestApplySafety:
-    """The applier must refuse unsafe plans before making any change."""
+def hit(uuid: str, *, in_dest: bool = True, added: str = "2026-01-01", problem: str = "") -> Hit:
+    return Hit(uuid=uuid, name=uuid, in_dest=in_dest, added=added, problem=problem)
 
-    MUTATING = {"trash_record", "ocr_record", "replicate_record", "set_record_custom_metadata"}
+
+class TestChooseExisting:
+    """Which verified record to file the document as."""
+
+    def test_none_verified(self) -> None:
+        assert choose_existing([hit("A", problem="its page count differs (9 vs 6)")]) is None
+
+    def test_prefers_record_already_in_destination(self) -> None:
+        chosen = choose_existing([hit("OLD", in_dest=False, added="2020"), hit("HERE", added="2026")])
+        assert chosen is not None and chosen.uuid == "HERE"
+
+    def test_then_prefers_oldest(self) -> None:
+        chosen = choose_existing([hit("NEW", added="2026-09-21"), hit("OLD", added="2024-02-12")])
+        assert chosen is not None and chosen.uuid == "OLD"
+
+    def test_ignores_unverified_even_in_destination(self) -> None:
+        chosen = choose_existing([hit("BAD", problem="it is a Markdown, not a PDF"), hit("GOOD", in_dest=False)])
+        assert chosen is not None and chosen.uuid == "GOOD"
+
+
+class TestFileExisting:
+    """A file whose hash is already in DEVONthink: replicate a verified record, never change it."""
+
+    def test_curated_record_is_never_replaced(self, dt: FakeDevonthink, pdf: Path) -> None:
+        """Regression for the 2026-09-21 incident.
+
+        An AppleScript-era record: never OCR'd (so byte-identical to the source),
+        renamed by DEVONthink, carrying metadata. OCR is wanted for the incoming
+        file. The old logic planned to OCR this record and trash it.
+        """
+        group = dt.group("/Harvard Business Review")
+        curated = dt.add_record(
+            pdf, group, stamp=sha256_file(pdf), processed=False,
+            name="The Science of Developing Creative Talent",
+            metadata={"author": "Deshmane", "abstract": "An HBR article."},
+        )
+        before = dict(dt.records[curated], meta=dict(dt.records[curated]["meta"]))
+        importer, _ = make_importer(dt, SCANNED)
+
+        result = importer.run(pdf, "Liberty.University/Harvard Business Review/H099N1-PDF-ENG.pdf")
+
+        assert result.status == "replicated"
+        assert result.uuid == curated
+        assert result.name == "The Science of Developing Creative Talent"
+        assert dt.mutations() == {"create_group_path"}  # nothing else changed
+        assert dt.records[curated]["meta"] == before["meta"]
+        assert dt.records[curated]["name"] == before["name"]
+        assert not dt.records[curated]["trashed"]
+
+    def test_rerun_after_success_changes_nothing(self, dt: FakeDevonthink, pdf: Path) -> None:
+        importer, _ = make_importer(dt, SCANNED)
+        first = importer.run(pdf, "Liberty.University/paper.pdf")
+        before = set(dt.live())
+        dt.calls.clear()
+
+        second = make_importer(dt, SCANNED)[0].run(pdf, "Liberty.University/paper.pdf")
+
+        assert second.status == "replicated"
+        assert second.uuid == first.uuid
+        assert set(dt.live()) == before
+        assert not dt.mutations()
+
+    def test_replicated_into_new_group(self, dt: FakeDevonthink, pdf: Path) -> None:
+        first = make_importer(dt, SCANNED)[0].run(pdf, "Liberty.University/BUSI770/paper.pdf")
+        second = make_importer(dt, SCANNED)[0].run(pdf, "Liberty.University/BUSI771/paper.pdf")
+
+        assert second.status == "replicated"
+        assert second.location == "/BUSI771/"
+        assert dt.records[first.uuid]["parents"] == {dt.groups["/BUSI770"], dt.groups["/BUSI771"]}
 
     @pytest.mark.parametrize(
-        "plan",
+        ("arrange", "message"),
         [
-            Plan(status="recovered", keep="P", trash=("P",)),  # trash what it keeps
-            Plan(status="recovered", keep="R", trash=("P",)),  # trash a processed record
-            Plan(status="recovered", ocr="P", trash=()),  # OCR a processed record
-            Plan(status="recovered", keep="R", ocr="R"),  # both keep and ocr
-            Plan(status="recovered"),  # neither
-            Plan(status="replicated", keep="NOT-A-HIT"),
+            (lambda dt, pdf, h: dt.add_record(pdf, "INBOX", stamp=h + "0"), "sourcehash differs"),
+            (lambda dt, pdf, h: dt.add_record(pdf, "INBOX", stamp=h, record_type="markdown"), "not a PDF"),
+            (lambda dt, pdf, h: dt.add_record(pdf, "INBOX", stamp=h, pages=9, name="Merged Reader"),
+             "matches 'Merged Reader' by hash but its page count differs (9 vs 1)"),
         ],
+        ids=["stamp-substring", "not-a-pdf", "page-count"],
     )
-    def test_refuses_unsafe_plan(self, dt: FakeDevonthink, plan: Plan) -> None:
-        """Should raise UNSAFE_PLAN and touch nothing."""
+    def test_unverifiable_match_fails_and_changes_nothing(
+        self, dt: FakeDevonthink, pdf: Path, arrange: Any, message: str
+    ) -> None:
+        """Should FAIL 1012 -- visible, and the file stays in the import folder -- not file it."""
+        arrange(dt, pdf, sha256_file(pdf))
         importer, _ = make_importer(dt, SCANNED)
-        hits = [hit("R", raw=True), hit("P", raw=False)]
         with pytest.raises(ImporterError) as exc:
-            importer._apply(plan, hits, "hash", "DB", "DEST")
-        assert exc.value.code == errors.UNSAFE_PLAN
-        assert not self.MUTATING & {name for name, _ in dt.calls}
+            importer.run(pdf, "Liberty.University/paper.pdf")
+        assert exc.value.code == errors.AMBIGUOUS_MATCH
+        assert message in str(exc.value)
+        assert not dt.mutations()
 
-    def test_trash_rechecks_bytes(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """Should not trash a record whose file changed since it was classified raw."""
-        importer, reported = make_importer(dt, SCANNED)
-        source_hash = sha256_file(pdf)
-        keep = dt.add_record(pdf, "DEST", stamp=source_hash, processed=True)
-        stale = dt.add_record(pdf, "DEST", stamp=source_hash, processed=False)
-        dt.records[stale]["path"].write_bytes(b"annotated since the search")
+    def test_unknown_incoming_page_count_fails(self, dt: FakeDevonthink, pdf: Path) -> None:
+        dt.add_record(pdf, "INBOX", stamp=sha256_file(pdf))
+        importer, _ = make_importer(dt, (0, 0, 0), pages=0)
+        with pytest.raises(ImporterError) as exc:
+            importer.run(pdf, "Liberty.University/paper.pdf")
+        assert exc.value.code == errors.AMBIGUOUS_MATCH
 
-        importer._apply(
-            Plan(status="recovered", keep=keep, trash=(stale,)),
-            [hit(keep, raw=False), hit(stale, raw=True)],
-            source_hash, "DB", "DEST",
-        )
-        assert not dt.records[stale]["trashed"]
-        assert any("not trashing" in line for line in reported)
+    def test_verified_record_chosen_over_unverified(self, dt: FakeDevonthink, pdf: Path) -> None:
+        stamp = sha256_file(pdf)
+        dt.add_record(pdf, "INBOX", stamp=stamp, record_type="markdown", name="summary")
+        real = dt.add_record(pdf, "INBOX", stamp=stamp, name="the paper")
+        result = make_importer(dt, SCANNED)[0].run(pdf, "Liberty.University/paper.pdf")
+        assert result.uuid == real
+
+    def test_leftover_pair_is_left_alone(self, dt: FakeDevonthink, pdf: Path) -> None:
+        """An un-OCR'd record beside an OCR'd one is reported, never tidied."""
+        stamp = sha256_file(pdf)
+        older = dt.add_record(pdf, "INBOX", stamp=stamp, processed=False, added="2026-09-19")
+        dt.add_record(pdf, "INBOX", stamp=stamp, processed=True, added="2026-09-20")
+        result = make_importer(dt, SCANNED)[0].run(pdf, "Liberty.University/paper.pdf")
+        assert result.uuid == older
+        assert not dt.mutations()
+
+    def test_replicate_that_does_not_land_fails(self, dt: FakeDevonthink, pdf: Path) -> None:
+        dt.add_record(pdf, "INBOX", stamp=sha256_file(pdf))
+        dt.replicate_behaviour = "noop"
+        with pytest.raises(ImporterError) as exc:
+            make_importer(dt, SCANNED)[0].run(pdf, "Liberty.University/BUSI770/paper.pdf")
+        assert exc.value.code == errors.REPLICATE_FAILED
+
+
+class TestTrashGuard:
+    """Only records created by the same run may ever be trashed."""
+
+    def test_refuses_record_not_created_this_run(self, dt: FakeDevonthink, pdf: Path) -> None:
+        existing = dt.add_record(pdf, "INBOX", stamp="h")
+        importer, _ = make_importer(dt, SCANNED)
+        with pytest.raises(ImporterError) as exc:
+            importer._trash_created(existing, "DB")
+        assert exc.value.code == errors.UNSAFE_TRASH
+        assert not dt.called("trash_record")
+        assert not dt.records[existing]["trashed"]
 
 
 class TestImportNew:
@@ -376,41 +325,43 @@ class TestImportNew:
 
     def test_scanned_pdf_is_ocrd_and_original_trashed(self, dt: FakeDevonthink, pdf: Path) -> None:
         """Should leave exactly one live record: the OCR'd copy, stamped, in place."""
-        importer, _ = make_importer(dt, SCANNED)
-        result = importer.run(pdf, "Liberty.University/BUSI770/Week01/paper.pdf")
+        result = make_importer(dt, SCANNED)[0].run(pdf, "Liberty.University/BUSI770/Week01/paper.pdf")
 
         assert result.status == "success"
         assert list(dt.live()) == [result.uuid]
         kept = dt.records[result.uuid]
         assert kept["meta"]["sourcehash"] == sha256_file(pdf)
         assert kept["parents"] == {dt.groups["/BUSI770/Week01"]}
-        assert sha256_file(kept["path"]) != sha256_file(pdf)  # it is the OCR'd copy
+        assert result.location == "/BUSI770/Week01/"
+        assert len(dt.called("trash_record")) == 1
 
     def test_stamp_precedes_ocr(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """Should stamp before OCR, so an interrupted run leaves a findable record."""
-        importer, _ = make_importer(dt, SCANNED)
-        importer.run(pdf, "Liberty.University/paper.pdf")
+        make_importer(dt, SCANNED)[0].run(pdf, "Liberty.University/paper.pdf")
         order = [name for name, _ in dt.calls]
         assert order.index("set_record_custom_metadata") < order.index("ocr_record")
 
     def test_stamp_uses_merge(self, dt: FakeDevonthink, pdf: Path) -> None:
         """Should never use the default mode, which replaces all custom metadata."""
-        importer, _ = make_importer(dt, SCANNED)
-        importer.run(pdf, "Liberty.University/paper.pdf")
+        make_importer(dt, SCANNED)[0].run(pdf, "Liberty.University/paper.pdf")
         assert all(args["mode"] == "merge" for args in dt.called("set_record_custom_metadata"))
 
     def test_born_digital_skips_ocr(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """Should import a full-text PDF as-is."""
-        importer, _ = make_importer(dt, BORN_DIGITAL)
-        result = importer.run(pdf, "Liberty.University/BUSI770/paper.pdf")
-
+        result = make_importer(dt, BORN_DIGITAL)[0].run(pdf, "Liberty.University/BUSI770/paper.pdf")
         assert result.status == "imported"
         assert not dt.called("ocr_record")
         assert not dt.called("trash_record")
 
-    @pytest.mark.parametrize("behaviour", ["timeout", "error"])
-    def test_ocr_failure_keeps_original(self, dt: FakeDevonthink, pdf: Path, behaviour: str) -> None:
-        """Should keep the stamped original and warn, as the AppleScript did."""
+    def test_encrypted_pdf_skips_ocr(self, dt: FakeDevonthink, pdf: Path) -> None:
+        """Password-protected PDFs read as 0 chars/page, but OCR always fails on them."""
+        importer, reported = make_importer(dt, ENCRYPTED, encrypted=True)
+        result = importer.run(pdf, "Liberty.University/Harvard Business Review/H04XBL-PDF-ENG.pdf")
+        assert result.status == "imported"
+        assert not dt.called("ocr_record")
+        assert "Password-protected PDF; OCR skipped" in reported
+
+    @pytest.mark.parametrize(("behaviour", "note"), [("timeout", "OCR did not finish"), ("error", "OCR failed")])
+    def test_ocr_failure_keeps_original(self, dt: FakeDevonthink, pdf: Path, behaviour: str, note: str) -> None:
+        """Should keep the stamped original, as the AppleScript did."""
         dt.ocr_behaviour = behaviour
         importer, reported = make_importer(dt, SCANNED)
         result = importer.run(pdf, "Liberty.University/paper.pdf")
@@ -418,40 +369,50 @@ class TestImportNew:
         assert result.status == "imported"
         assert not dt.called("trash_record")
         assert dt.records[result.uuid]["meta"]["sourcehash"] == sha256_file(pdf)
-        assert any(line.startswith("WARNING: OCR") for line in reported)
+        assert any(line.startswith(note) for line in reported)
+
+    @pytest.mark.parametrize(("behaviour", "note"), [
+        ("same", "OCR returned the original record"),
+        ("unstamped", "could not be verified"),
+    ])
+    def test_unverified_ocr_copy_never_costs_the_original(
+        self, dt: FakeDevonthink, pdf: Path, behaviour: str, note: str
+    ) -> None:
+        """B4: trash the original only once a distinct, stamped copy exists."""
+        dt.ocr_behaviour = behaviour
+        importer, reported = make_importer(dt, SCANNED)
+        result = importer.run(pdf, "Liberty.University/paper.pdf")
+
+        assert result.status == "imported"
+        assert not dt.called("trash_record")
+        assert not dt.records[result.uuid]["trashed"]
+        assert any(note in line for line in reported)
 
     def test_unsearchable_result_fails_1008(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """Should fail when the landed record has no words at all."""
         dt.ocr_behaviour = "error"
         dt.raw_word_count = 0
-        importer, _ = make_importer(dt, SCANNED)
         with pytest.raises(ImporterError) as exc:
-            importer.run(pdf, "Liberty.University/paper.pdf")
+            make_importer(dt, SCANNED)[0].run(pdf, "Liberty.University/paper.pdf")
         assert exc.value.code == errors.NOT_SEARCHABLE
 
     def test_root_level_goes_to_incoming_group(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """<db>/file.pdf should land in the incoming group without creating groups."""
-        importer, _ = make_importer(dt, BORN_DIGITAL)
-        result = importer.run(pdf, "Liberty.University/paper.pdf")
+        result = make_importer(dt, BORN_DIGITAL)[0].run(pdf, "Liberty.University/paper.pdf")
         assert dt.records[result.uuid]["parents"] == {"INBOX"}
+        assert result.location == "/Inbox/"
         assert not dt.called("create_group_path")
 
     def test_inbox_subgroups_use_real_inbox_name(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """<db>/Inbox/<groups>/ should build the path from the incoming group's name."""
-        dt.group_props["INBOX"] = {"location": "/", "name": "Eingang"}
-        importer, _ = make_importer(dt, BORN_DIGITAL)
-        importer.run(pdf, "Liberty.University/Inbox/Week01/paper.pdf")
+        dt.group_props["INBOX"] = {"uuid": "INBOX", "location": "/", "name": "Eingang", "type": "group"}
+        result = make_importer(dt, BORN_DIGITAL)[0].run(pdf, "Liberty.University/Inbox/Week01/paper.pdf")
         assert dt.called("create_group_path")[0]["location"] == "/Eingang/Week01"
+        assert result.location == "/Eingang/Week01/"
 
     def test_unknown_database_fails_1002(self, dt: FakeDevonthink, pdf: Path) -> None:
-        importer, _ = make_importer(dt, BORN_DIGITAL)
         with pytest.raises(ImporterError) as exc:
-            importer.run(pdf, "No.Such.Database/paper.pdf")
+            make_importer(dt, BORN_DIGITAL)[0].run(pdf, "No.Such.Database/paper.pdf")
         assert exc.value.code == errors.DATABASE_NOT_FOUND
 
     def test_enrichment_runs_when_doi_detected(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """Should resolve a detected DOI and keep the stamp."""
-        importer, _ = make_importer(dt, BORN_DIGITAL)
         original_import = dt._import_file
 
         def import_with_doi(**kwargs: Any) -> dict[str, Any]:
@@ -460,69 +421,80 @@ class TestImportNew:
             return rec
 
         dt._import_file = import_with_doi  # type: ignore[method-assign]
-        result = importer.run(pdf, "Liberty.University/paper.pdf")
+        result = make_importer(dt, BORN_DIGITAL)[0].run(pdf, "Liberty.University/paper.pdf")
 
         meta = dt.records[result.uuid]["meta"]
         assert meta["journal"] == "Personnel Psychology"
         assert meta["sourcehash"] == sha256_file(pdf)
         assert dt.called("resolve_doi_metadata")[0]["rename"] is False
 
+    def test_never_touches_database_files(self, dt: FakeDevonthink, pdf: Path) -> None:
+        """Every path through the importer works through MCP properties alone."""
+        make_importer(dt, SCANNED)[0].run(pdf, "Liberty.University/paper.pdf")
+        make_importer(dt, SCANNED)[0].run(pdf, "Liberty.University/BUSI770/paper.pdf")
+        assert not dt.called("get_imported_record_path")
 
-class TestRecovery:
-    """Re-runs and interrupted runs, resolved through the hash search."""
 
-    def test_rerun_after_success_changes_nothing(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """Should report replicated and create or trash nothing."""
-        importer, _ = make_importer(dt, SCANNED)
-        first = importer.run(pdf, "Liberty.University/paper.pdf")
-        before = dict(dt.live())
+class TestMain:
+    """What the pipeline receives: exit status, stdout, and stderr."""
 
-        second = importer.run(pdf, "Liberty.University/paper.pdf")
-        assert second.status == "replicated"
-        assert second.uuid == first.uuid
-        assert dt.live().keys() == before.keys()
+    @pytest.fixture
+    def run_main(self, dt: FakeDevonthink, monkeypatch: pytest.MonkeyPatch):
+        from rap_importer_plugin.devonthink import importer as importer_module
 
-    def test_existing_record_replicated_to_new_group(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """Should replicate an existing record into a different destination."""
-        importer, _ = make_importer(dt, SCANNED)
-        first = importer.run(pdf, "Liberty.University/BUSI770/paper.pdf")
-        second = importer.run(pdf, "Liberty.University/BUSI771/paper.pdf")
+        class FakeClient:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
 
-        assert second.status == "replicated"
-        assert dt.records[first.uuid]["parents"] == {
-            dt.groups["/BUSI770"], dt.groups["/BUSI771"],
-        }
+            def __enter__(self) -> FakeDevonthink:
+                return dt
 
-    def test_crash_before_ocr_is_repaired(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """A stamped, never-OCR'd record should be OCR'd and replaced."""
-        raw = dt.add_record(pdf, "INBOX", stamp=sha256_file(pdf), processed=False)
-        importer, _ = make_importer(dt, SCANNED)
-        result = importer.run(pdf, "Liberty.University/paper.pdf")
+            def __exit__(self, *exc: object) -> None:
+                pass
 
-        assert result.status == "recovered"
-        assert dt.records[raw]["trashed"]
-        assert list(dt.live()) == [result.uuid]
-        assert dt.records[result.uuid]["words"] > dt.raw_word_count
+        monkeypatch.setattr(importer_module, "MCPClient", FakeClient)
 
-    def test_crash_after_ocr_is_tidied(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """A leftover original beside its OCR'd copy should be trashed."""
-        stamp = sha256_file(pdf)
-        processed = dt.add_record(pdf, "INBOX", stamp=stamp, processed=True)
-        raw = dt.add_record(pdf, "INBOX", stamp=stamp, processed=False)
-        importer, _ = make_importer(dt, SCANNED)
-        result = importer.run(pdf, "Liberty.University/paper.pdf")
+        def run(pdf: Path, relative: str) -> int:
+            return importer_module.main([str(pdf), relative], text_stats=lambda _p: BORN_DIGITAL)
 
-        assert result.status == "recovered"
-        assert result.uuid == processed
-        assert dt.records[raw]["trashed"]
-        assert not dt.called("ocr_record")
+        return run
 
-    def test_annotated_record_is_never_trashed(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """A record whose bytes differ from the source must survive any re-run."""
-        annotated = dt.add_record(pdf, "INBOX", stamp=sha256_file(pdf), processed=True)
-        importer, _ = make_importer(dt, SCANNED)
-        importer.run(pdf, "Liberty.University/paper.pdf")
-        assert not dt.records[annotated]["trashed"]
+    def test_failure_reason_comes_before_timing(
+        self, dt: FakeDevonthink, pdf: Path, run_main: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The notification banner shows stderr's first line, so it must be the reason."""
+        dt.add_record(pdf, "INBOX", stamp=sha256_file(pdf), pages=9, name="Decoy")
+
+        assert run_main(pdf, "Liberty.University/paper.pdf") == 1
+        stderr = capsys.readouterr().err.splitlines()
+        assert "matches 'Decoy' by hash" in stderr[0] and stderr[0].endswith("(1012)")
+        assert stderr[1:] and all(line.startswith("TIMING:") for line in stderr[1:])
+
+    def test_success_output(
+        self, dt: FakeDevonthink, pdf: Path, run_main: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert run_main(pdf, "Liberty.University/BUSI770/paper.pdf") == 0
+        out = capsys.readouterr()
+        lines = out.out.splitlines()
+        assert lines[-4] == "imported"
+        assert lines[-3].startswith("record=")
+        assert lines[-2].endswith("location=/BUSI770/")
+        assert lines[-1].startswith("sourcehash=")
+        assert all(line.startswith("TIMING:") for line in out.err.splitlines())
+
+
+class TestResultLines:
+    """What the pipeline logs, so the log answers 'where did it go'."""
+
+    def test_lines(self) -> None:
+        result = ImportResult("replicated", "A3C8BD54", "ad0221cd", "The Science of Developing Creative Talent",
+                              "/Harvard Business Review/")
+        assert result_lines(result) == [
+            "replicated",
+            "record=A3C8BD54",
+            'name="The Science of Developing Creative Talent" location=/Harvard Business Review/',
+            "sourcehash=ad0221cd",
+        ]
 
 
 class TestEnrichment:
@@ -542,16 +514,12 @@ class TestEnrichment:
         assert looks_like_isbn(value) is expected
 
     def test_issn_is_not_sent_to_book_lookup(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """Should skip enrichment rather than look up a book by ISSN."""
-        uuid = dt.add_record(pdf, "INBOX", stamp="h", processed=True)
-        dt.records[uuid]["meta"]["is?n"] = "0031-5826"
-        reported: list[str] = []
-        assert enrich_record(dt, uuid, "DB", report=reported.append) is None  # type: ignore[arg-type]
+        uuid = dt.add_record(pdf, "INBOX", stamp="h", metadata={"is?n": "0031-5826"})
+        assert enrich_record(dt, uuid, "DB", report=[].append) is None  # type: ignore[arg-type]
         assert not dt.called("resolve_book_metadata")
 
     def test_failure_is_not_fatal(self, dt: FakeDevonthink, pdf: Path) -> None:
-        """Should report and carry on when the resolver fails."""
-        uuid = dt.add_record(pdf, "INBOX", stamp="h", processed=True)
+        uuid = dt.add_record(pdf, "INBOX", stamp="h")
         dt.records[uuid]["doi"] = "10.1/x"
 
         def unreachable(**_: Any) -> None:

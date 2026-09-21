@@ -15,8 +15,10 @@ HASH_FAILED = 1007
 NOT_SEARCHABLE = 1008
 # New with the MCP importer
 MCP_FAILED = 1009
-UNSAFE_PLAN = 1010
+UNSAFE_TRASH = 1010  # refused to trash a record this run did not create
 STAMP_FAILED = 1011
+AMBIGUOUS_MATCH = 1012  # hash matches, but no record verifies as the same document
+REPLICATE_FAILED = 1013
 
 
 class ImporterError(Exception):

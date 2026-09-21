@@ -1,22 +1,29 @@
 """Import one PDF into DEVONthink through the DEVONthink MCP server.
 
 Port of scripts/devonthink_importer.applescript. Routing, duplicate detection,
-the OCR decision and the error codes are unchanged. What changed is forced by
-the MCP tools:
+the OCR decision and the error codes carry over. What changed is forced by the
+MCP tools:
 
 - OCR is two steps. `import_file` lands the file, then `ocr_record` produces a
   searchable copy as a NEW record and leaves the original in place. The
-  pre-OCR original is trashed once the OCR'd copy exists.
-- The sourcehash stamp goes on immediately after import, before OCR, so an
-  interrupted run leaves a record the next run can find by hash. (The
-  AppleScript stamped last, and needed an orphan scan to recover.)
+  pre-OCR original -- created seconds earlier by the same run -- is trashed
+  once the OCR'd copy is verified.
+- The sourcehash stamp goes on immediately after import, before OCR.
 - The MCP server gives DEVONthink 900 s per call, so the AppleScript's 120 s
   Apple Event ceiling -- and the -1712 handling built around it -- is gone.
 
-Recognising a pre-OCR original relies on the sourcehash being computed on the
-filesystem, outside DEVONthink: a record whose file still hashes to its
-sourcehash is a byte-identical copy of the source that DEVONthink has not
-transformed. That is the only kind of record this module will ever trash.
+Two rules keep existing documents safe:
+
+- A record this run did not create is never OCR'd, modified or trashed. When
+  the incoming file matches an existing record by hash, the record is only
+  replicated into the destination group -- and only once it is verified to be
+  the same document. An unverifiable match fails the run instead.
+- DEVONthink records are only ever examined through the MCP server. Nothing
+  here reads or writes files inside a DEVONthink database.
+
+The runner surfaces only pass or fail (a failure notification, with the file
+left in the import folder). So there are no warnings: anything that could
+lose content or file a document against the wrong record fails the run.
 """
 
 from __future__ import annotations
@@ -43,6 +50,7 @@ from .mcp_client import (
     MCPToolError,
     StdioTransport,
 )
+from .pdf_info import PdfInfo, pdf_info
 
 DEFAULT_OCR_TIMEOUT = 300.0
 CALL_TIMEOUT = 120.0
@@ -56,6 +64,7 @@ SEARCH_TIMEOUT = 300.0
 SKIP_OCR_ABOVE_CHARS_PER_PAGE = 1000
 
 TextStats = Callable[[str], tuple[int, int, int]]
+InspectPdf = Callable[[str | Path], PdfInfo]
 
 
 # ===================
@@ -141,78 +150,62 @@ def needs_ocr(pages: int, chars_per_page: int) -> bool:
 
 
 # ===================
-# RECONCILING EXISTING RECORDS
+# MATCHING EXISTING RECORDS
 # ===================
 
 
 @dataclass(frozen=True)
 class Hit:
-    """An existing record carrying the incoming file's sourcehash."""
+    """An existing record whose sourcehash search matched the incoming file."""
 
     uuid: str
-    raw: bool  # file is byte-identical to the source: DEVONthink hasn't transformed it
+    name: str
     in_dest: bool  # already filed in the destination group
     added: str  # additionDate, ISO 8601
+    problem: str = ""  # why it is not verified as the same document; "" when it is
+
+    @property
+    def verified(self) -> bool:
+        return not self.problem
 
 
-@dataclass(frozen=True)
-class Plan:
-    """What to do about existing hits.
+def identity_problem(props: dict[str, Any], source_hash: str, pages: int) -> str:
+    """Why a hash-matched record is not verifiably the incoming document, or "".
 
-    Exactly one of `keep` / `ocr` is set. When `ocr` is set, that raw record is
-    OCR'd and the result is what gets kept. `status` is reported on stdout.
+    Judged from the record's DEVONthink properties alone, never its file:
+    - its stored sourcehash equals the incoming hash exactly, rather than
+      trusting however the search operator matched;
+    - it is a PDF -- a converted or derived record can inherit the stamp
+      without being the document;
+    - the page counts agree. OCR and annotation never change a page count; a
+      merged, split or replaced document does.
     """
+    stamp = (props.get("customMetadata") or {}).get("sourcehash")
+    if stamp != source_hash:
+        return f"its stored sourcehash differs ({str(stamp)[:12]}...)"
+    if props.get("type") != "pdf":
+        return f"it is a {props.get('kind') or props.get('type')}, not a PDF"
+    record_pages = props.get("pageCount") or 0
+    if not pages:
+        return "this file's page count could not be read"
+    if not record_pages:
+        return "its page count is unknown"
+    if record_pages != pages:
+        return f"its page count differs ({record_pages} vs {pages})"
+    return ""
 
-    status: str  # "replicated" or "recovered"
-    keep: str | None = None
-    ocr: str | None = None
-    trash: tuple[str, ...] = ()
 
+def choose_existing(hits: list[Hit]) -> Hit | None:
+    """Pick the record to file this document as, or None when none verifies.
 
-def decide_existing(hits: list[Hit], ocr_wanted: bool) -> Plan:
-    """Decide how to reconcile records that already carry this file's sourcehash.
-
-    Raw hits are pre-OCR originals left behind by an interrupted run (or, when
-    OCR is not wanted, ordinary finished imports of a born-digital file).
-    Processed hits are records DEVONthink has transformed -- OCR'd, or
-    annotated since.
-
-        ocr_wanted  hits                action                               status
-        ----------  ------------------  -----------------------------------  ----------
-        yes         >= 1 processed      keep a processed hit, trash raws     recovered if anything
-                                                                             is trashed, else
-                                                                             replicated
-        yes         raw only            OCR a raw hit, trash the raws        recovered
-        no          any                 keep a hit, trash nothing            replicated
-
-    The importer makes sure the kept record ends up in the destination group
-    (replicating it there if needed), so the plan only picks records.
-
-    Safety net: the applier refuses any plan that trashes a record whose `raw`
-    is False, or the record being kept -- so a mistake here fails loudly
-    instead of losing a document.
+    Prefer a record already in the destination group, so nothing needs
+    replicating; then the oldest, which is the one most likely to carry
+    annotations, x-devonthink-item links and Obsidian references.
     """
-    def best(candidates: list[Hit]) -> Hit:
-        # Prefer a record already in the destination, so nothing needs
-        # replicating; then the oldest, which is the one most likely to carry
-        # annotations, x-devonthink-item links and Obsidian references.
-        return min(candidates, key=lambda h: (not h.in_dest, h.added))
-
-    if not ocr_wanted:
-        # Raw hits are finished born-digital imports here, not leftovers.
-        return Plan(status="replicated", keep=best(hits).uuid)
-
-    raws = [h for h in hits if h.raw]
-    processed = [h for h in hits if not h.raw]
-    trash = tuple(h.uuid for h in raws)
-    if processed:
-        return Plan(
-            status="recovered" if trash else "replicated",
-            keep=best(processed).uuid,
-            trash=trash,
-        )
-    # Every copy is raw: OCR one (they are byte-identical), then trash them all.
-    return Plan(status="recovered", ocr=best(raws).uuid, trash=trash)
+    verified = [h for h in hits if h.verified]
+    if not verified:
+        return None
+    return min(verified, key=lambda h: (not h.in_dest, h.added))
 
 
 # ===================
@@ -222,9 +215,21 @@ def decide_existing(hits: list[Hit], ocr_wanted: bool) -> Plan:
 
 @dataclass(frozen=True)
 class ImportResult:
-    status: str  # success | imported | recovered | replicated
+    status: str  # success | imported | replicated
     uuid: str
     sourcehash: str
+    name: str
+    location: str  # the destination group, as a DEVONthink location path
+
+
+def result_lines(result: ImportResult) -> list[str]:
+    """The stdout lines the pipeline logs for a successful run."""
+    return [
+        result.status,
+        f"record={result.uuid}",
+        f'name="{result.name}" location={result.location}',
+        f"sourcehash={result.sourcehash}",
+    ]
 
 
 class DevonthinkImporter:
@@ -235,6 +240,7 @@ class DevonthinkImporter:
         client: MCPClient,
         *,
         text_stats: TextStats,
+        inspect_pdf: InspectPdf = pdf_info,
         ocr_timeout: float = DEFAULT_OCR_TIMEOUT,
         enrich: bool = True,
         enrich_rename: bool = False,
@@ -243,39 +249,44 @@ class DevonthinkImporter:
     ) -> None:
         self.client = client
         self.text_stats = text_stats
+        self.inspect_pdf = inspect_pdf
         self.ocr_timeout = ocr_timeout
         self.enrich = enrich
         self.enrich_rename = enrich_rename
         self.report = report
         self.timing = timing or (lambda op, secs: None)
+        # The only records this run may ever trash.
+        self._created_this_run: set[str] = set()
 
     def run(self, file_path: Path, relative_path: str) -> ImportResult:
         components = parse_path_components(relative_path)
         database = self._database(components.database)
         db_uuid = database["uuid"]
-        dest_uuid = self._destination(database, components)
+        dest_uuid, dest_path = self._destination(database, components)
 
         with self._timed("hash"):
             source_hash = sha256_file(file_path)
-        pages, _, per_page = self.text_stats(str(file_path))
-        ocr_wanted = needs_ocr(pages, per_page)
+        info = self.inspect_pdf(file_path)
+        stats_pages, chars, _ = self.text_stats(str(file_path))
+        pages = info.pages or stats_pages
+        ocr_wanted = needs_ocr(pages, chars // pages if pages else 0)
 
         with self._timed("search"):
-            hits = self._find_hits(source_hash, db_uuid, dest_uuid)
-
+            hits = self._find_hits(source_hash, db_uuid, dest_uuid, pages)
         if hits:
-            plan = decide_existing(hits, ocr_wanted)
-            keeper, status, produced = self._apply(plan, hits, source_hash, db_uuid, dest_uuid)
-            if produced:
-                self._finish(keeper, source_hash, db_uuid, file_path)
-            return ImportResult(status, keeper, source_hash)
-
-        return self._import_new(file_path, source_hash, db_uuid, dest_uuid, ocr_wanted)
+            return self._file_existing(file_path, hits, source_hash, db_uuid, dest_uuid, dest_path)
+        return self._import_new(
+            file_path, source_hash, db_uuid, dest_uuid, dest_path, ocr_wanted, info.encrypted
+        )
 
     # ---- lookups ----
 
     def _call(self, tool: str, timeout: float | None = None, **arguments: Any) -> Any:
         return self.client.call_tool(tool, arguments, timeout=timeout)
+
+    @staticmethod
+    def _by_uuid(batch: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        return {entry["uuid"]: entry for entry in batch.get("results", [])}
 
     def _database(self, name: str) -> dict[str, Any]:
         for db in self._call("get_databases"):
@@ -287,7 +298,8 @@ class DevonthinkImporter:
             errors.DATABASE_NOT_FOUND,
         )
 
-    def _destination(self, database: dict[str, Any], components: PathComponents) -> str:
+    def _destination(self, database: dict[str, Any], components: PathComponents) -> tuple[str, str]:
+        """Return the destination group's uuid and its location path."""
         db_uuid = database["uuid"]
         if components.is_inbox or components.is_root_level:
             inbox_uuid = database.get("incomingGroupUUID")
@@ -296,25 +308,26 @@ class DevonthinkImporter:
                     f"Database has no incoming group configured: {database['name']}",
                     errors.NO_INCOMING_GROUP,
                 )
-            if not components.group_path:
-                return inbox_uuid
             if inbox_uuid == database.get("rootUUID"):
-                location = f"/{components.group_path}"
+                base = ""
             else:
                 # Build from the incoming group's real name and place, not a
                 # literal "Inbox", so a renamed inbox can't spawn a stray group.
                 inbox = self._call("get_record_properties", uuid=inbox_uuid, database_uuid=db_uuid)
                 base = inbox["location"].rstrip("/") + "/" + inbox["name"]
-                location = f"{base}/{components.group_path}"
+            if not components.group_path:
+                return inbox_uuid, f"{base}/"
+            location = f"{base}/{components.group_path}"
         else:
             if not components.group_path:
-                return database["rootUUID"]
+                return database["rootUUID"], "/"
             location = f"/{components.group_path}"
-        return self._call("create_group_path", location=location, database_uuid=db_uuid)["uuid"]
+        group = self._call("create_group_path", location=location, database_uuid=db_uuid)
+        return group["uuid"], f"{location}/"
 
-    def _find_hits(self, source_hash: str, db_uuid: str, dest_uuid: str) -> list[Hit]:
-        # Trashed records are excluded by the search (verified), so a trashed
-        # pre-OCR original can never be mistaken for a live duplicate.
+    def _find_hits(self, source_hash: str, db_uuid: str, dest_uuid: str, pages: int) -> list[Hit]:
+        # Trashed records are excluded by the search, so a trashed record can
+        # never be mistaken for a live duplicate.
         found = self._call(
             "search_records",
             timeout=SEARCH_TIMEOUT,
@@ -327,105 +340,88 @@ class DevonthinkImporter:
             return []
 
         uuids = [r["uuid"] for r in results]
-        paths = self._by_uuid(
-            self._call("get_imported_record_path", uuids=uuids, database_uuid=db_uuid)
-        )
-        parents = self._by_uuid(
-            self._call("get_record_parents", uuids=uuids, database_uuid=db_uuid)
-        )
+        props = self._by_uuid(self._call("get_record_properties", uuids=uuids, database_uuid=db_uuid))
+        parents = self._by_uuid(self._call("get_record_parents", uuids=uuids, database_uuid=db_uuid))
         return [
             Hit(
                 uuid=r["uuid"],
-                raw=self._is_raw(paths.get(r["uuid"], {}), source_hash),
-                in_dest=any(p.get("uuid") == dest_uuid for p in parents.get(r["uuid"], {}).get("parents", [])),
+                name=props.get(r["uuid"], {}).get("name", r["uuid"]),
+                in_dest=self._has_parent(parents.get(r["uuid"], {}), dest_uuid),
                 added=r.get("additionDate", ""),
+                problem=identity_problem(props.get(r["uuid"], {}), source_hash, pages),
             )
             for r in results
         ]
 
     @staticmethod
-    def _by_uuid(batch: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        return {entry["uuid"]: entry for entry in batch.get("results", [])}
+    def _has_parent(parents_entry: dict[str, Any], group_uuid: str) -> bool:
+        return any(p.get("uuid") == group_uuid for p in parents_entry.get("parents", []))
 
-    @staticmethod
-    def _is_raw(path_entry: dict[str, Any], source_hash: str) -> bool:
-        # Indexed records point at files outside the database -- never treat
-        # them as disposable, whatever their bytes.
-        path = path_entry.get("path")
-        if path_entry.get("indexed", True) or not path:
-            return False
-        try:
-            return sha256_file(path) == source_hash
-        except ImporterError:
-            return False
+    # ---- filing ----
 
-    # ---- actions ----
+    def _file_existing(
+        self,
+        file_path: Path,
+        hits: list[Hit],
+        source_hash: str,
+        db_uuid: str,
+        dest_uuid: str,
+        dest_path: str,
+    ) -> ImportResult:
+        """File the document as an existing record. Never modifies that record."""
+        chosen = choose_existing(hits)
+        if chosen is None:
+            first = hits[0]
+            more = f" (and {len(hits) - 1} more)" if len(hits) > 1 else ""
+            raise ImporterError(
+                f"{file_path.name} matches '{first.name}'{more} by hash but "
+                f"{first.problem} -- not filed",
+                errors.AMBIGUOUS_MATCH,
+            )
+        with self._timed("replicate"):
+            self._ensure_in_destination(chosen, db_uuid, dest_uuid)
+        return ImportResult("replicated", chosen.uuid, source_hash, chosen.name, dest_path)
+
+    def _ensure_in_destination(self, hit: Hit, db_uuid: str, dest_uuid: str) -> None:
+        if hit.in_dest:
+            return
+        self._call("replicate_record", uuid=hit.uuid, destination=dest_uuid, database_uuid=db_uuid)
+        parents = self._by_uuid(self._call("get_record_parents", uuids=[hit.uuid], database_uuid=db_uuid))
+        if not self._has_parent(parents.get(hit.uuid, {}), dest_uuid):
+            raise ImporterError(
+                f"Could not file '{hit.name}' into its destination group", errors.REPLICATE_FAILED
+            )
 
     def _import_new(
-        self, file_path: Path, source_hash: str, db_uuid: str, dest_uuid: str, ocr_wanted: bool
+        self,
+        file_path: Path,
+        source_hash: str,
+        db_uuid: str,
+        dest_uuid: str,
+        dest_path: str,
+        ocr_wanted: bool,
+        encrypted: bool,
     ) -> ImportResult:
         with self._timed("import"):
             original = self._call(
                 "import_file", path=str(file_path), database_uuid=db_uuid, destination=dest_uuid
             )["uuid"]
+        self._created_this_run.add(original)
         self._stamp(original, source_hash)
 
         keeper, status = original, "imported"
-        if ocr_wanted:
+        if encrypted:
+            # OCR always fails on these, and they carry a text layer anyway.
+            self.report("Password-protected PDF; OCR skipped")
+        elif ocr_wanted:
             with self._timed("ocr"):
                 ocr_copy = self._ocr(original)
-            if ocr_copy:
-                self._trash_raw(original, source_hash, db_uuid)
+            if ocr_copy and self._is_verified_copy(ocr_copy, original, source_hash, db_uuid):
+                self._trash_created(original, db_uuid)
                 keeper, status = ocr_copy, "success"
 
-        self._finish(keeper, source_hash, db_uuid, file_path)
-        return ImportResult(status, keeper, source_hash)
-
-    def _apply(
-        self, plan: Plan, hits: list[Hit], source_hash: str, db_uuid: str, dest_uuid: str
-    ) -> tuple[str, str, bool]:
-        """Carry out a Plan. Returns (kept uuid, status, whether a new record was made)."""
-        known = {h.uuid for h in hits}
-        raw = {h.uuid for h in hits if h.raw}
-
-        # Validate everything before touching anything.
-        problems = []
-        if (plan.keep is None) == (plan.ocr is None):
-            problems.append("exactly one of keep/ocr must be set")
-        if plan.keep is not None and plan.keep not in known:
-            problems.append(f"keep {plan.keep} is not a hit")
-        if plan.ocr is not None and plan.ocr not in raw:
-            problems.append(f"ocr target {plan.ocr} is not a raw hit")
-        if plan.keep in plan.trash:
-            problems.append(f"would trash the record it keeps ({plan.keep})")
-        if unsafe := [u for u in plan.trash if u not in raw]:
-            problems.append(f"would trash non-raw records {unsafe}")
-        if problems:
-            raise ImporterError(f"Refusing plan {plan}: {'; '.join(problems)}", errors.UNSAFE_PLAN)
-
-        keeper, status, produced = plan.keep, plan.status, False
-        if plan.ocr is not None:
-            with self._timed("ocr"):
-                ocr_copy = self._ocr(plan.ocr)
-            if ocr_copy:
-                keeper, produced = ocr_copy, True
-            else:
-                keeper, status = plan.ocr, "imported"
-        assert keeper is not None
-
-        for uuid in plan.trash:
-            if uuid != keeper:
-                self._trash_raw(uuid, source_hash, db_uuid)
-
-        with self._timed("replicate"):
-            self._ensure_in_destination(keeper, db_uuid, dest_uuid)
-        return keeper, status, produced
-
-    def _ensure_in_destination(self, uuid: str, db_uuid: str, dest_uuid: str) -> None:
-        parents = self._by_uuid(self._call("get_record_parents", uuids=[uuid], database_uuid=db_uuid))
-        if any(p.get("uuid") == dest_uuid for p in parents.get(uuid, {}).get("parents", [])):
-            return
-        self._call("replicate_record", uuid=uuid, destination=dest_uuid, database_uuid=db_uuid)
+        name = self._finish(keeper, source_hash, db_uuid, file_path)
+        return ImportResult(status, keeper, source_hash, name, dest_path)
 
     def _stamp(self, uuid: str, source_hash: str) -> None:
         # mode="merge" is essential: the default REPLACES all custom metadata.
@@ -439,33 +435,44 @@ class DevonthinkImporter:
             raise ImporterError(f"Could not stamp sourcehash on {uuid}: {result}", errors.STAMP_FAILED)
 
     def _ocr(self, uuid: str) -> str | None:
-        """OCR a record. Returns the new record's uuid, or None to keep the original."""
+        """OCR a record this run created. Returns the copy's uuid, or None to keep the original."""
         try:
             return self._call("ocr_record", timeout=self.ocr_timeout, uuid=uuid)["uuid"]
         except MCPTimeout:
-            # DEVONthink keeps working after we stop waiting, so an OCR'd copy
-            # may still land beside the original. The next run that sees this
-            # file finds both by hash and tidies up.
-            self.report(
-                f"WARNING: OCR did not finish within {self.ocr_timeout:.0f}s; "
-                "keeping the document without OCR"
-            )
+            self.report(f"OCR did not finish within {self.ocr_timeout:.0f}s; kept without OCR")
         except MCPToolError as e:
-            self.report(f"WARNING: OCR failed ({e}); keeping the document without OCR")
+            self.report(f"OCR failed ({e}); kept without OCR")
         return None
 
-    def _trash_raw(self, uuid: str, source_hash: str, db_uuid: str) -> None:
-        """Trash a record, but only if it is still a byte-identical copy of the source."""
-        entry = self._by_uuid(
-            self._call("get_imported_record_path", uuids=[uuid], database_uuid=db_uuid)
-        ).get(uuid, {})
-        if not self._is_raw(entry, source_hash):
-            self.report(f"WARNING: not trashing {uuid}: it no longer matches the source file")
-            return
+    def _is_verified_copy(self, ocr_copy: str, original: str, source_hash: str, db_uuid: str) -> bool:
+        """True when OCR produced a distinct record that carries the stamp.
+
+        Guards against trashing the only copy: if ocr_record ever handed back
+        the original, or a copy we cannot confirm, the original is kept.
+        """
+        if ocr_copy == original:
+            self.report("OCR returned the original record, not a copy; kept without OCR")
+            return False
+        try:
+            metadata = self._call("get_record_custom_metadata", uuid=ocr_copy, database_uuid=db_uuid)
+        except MCPToolError:
+            metadata = {}
+        if metadata.get("sourcehash") != source_hash:
+            self.report(f"OCR copy {ocr_copy} could not be verified; kept the original")
+            return False
+        self._created_this_run.add(ocr_copy)
+        return True
+
+    def _trash_created(self, uuid: str, db_uuid: str) -> None:
+        """Trash a record this run created. Any other record is refused outright."""
+        if uuid not in self._created_this_run:
+            raise ImporterError(
+                f"Refusing to trash {uuid}: this run did not create it", errors.UNSAFE_TRASH
+            )
         self._call("trash_record", uuid=uuid, database_uuid=db_uuid)
 
-    def _finish(self, uuid: str, source_hash: str, db_uuid: str, file_path: Path) -> None:
-        """Enrich a newly made record, then confirm it is stamped and searchable."""
+    def _finish(self, uuid: str, source_hash: str, db_uuid: str, file_path: Path) -> str:
+        """Enrich a record this run made, confirm it is stamped and searchable, return its name."""
         if self.enrich:
             with self._timed("enrich"):
                 enrich_record(
@@ -476,7 +483,7 @@ class DevonthinkImporter:
         # every future import of this file a duplicate, so check anyway.
         metadata = self._call("get_record_custom_metadata", uuid=uuid, database_uuid=db_uuid)
         if metadata.get("sourcehash") != source_hash:
-            self.report("WARNING: sourcehash missing after enrichment; re-stamping")
+            self.report("sourcehash missing after enrichment; re-stamped")
             self._stamp(uuid, source_hash)
 
         # A record with no words is filed but invisible to search. It looks
@@ -488,6 +495,7 @@ class DevonthinkImporter:
                 f"Imported but NOT searchable (no text layer, OCR unavailable): {file_path}",
                 errors.NOT_SEARCHABLE,
             )
+        return props.get("name", "")
 
     @contextmanager
     def _timed(self, operation: str) -> Iterator[None]:
@@ -506,8 +514,9 @@ class DevonthinkImporter:
 def main(argv: list[str] | None = None, *, text_stats: TextStats) -> int:
     """Entry point for scripts/devonthink_importer.py.
 
-    stdout: WARNING lines, then the outcome (success | imported | recovered |
-    replicated), then `sourcehash=<hex>`. The pipeline logs every stdout line.
+    stdout: progress notes, then the outcome (success | imported | replicated),
+    `record=`, `name=`/`location=` and `sourcehash=`. The pipeline logs every
+    stdout line; none of it is shown to the user.
     stderr: `TIMING:` lines, which the pipeline logs, and on failure the error.
     Exit status is non-zero on failure, which stops the rest of the pipeline.
     """
@@ -536,9 +545,16 @@ def main(argv: list[str] | None = None, *, text_stats: TextStats) -> int:
     )
     args = parser.parse_args(argv)
 
-    def timing(operation: str, seconds: float) -> None:
-        print(f"TIMING: {operation}={seconds:.3f}s", file=sys.stderr)
+    # Held back until the outcome is known. On failure the pipeline turns all of
+    # stderr into the "Import Failed" notification, and a banner shows only its
+    # first line -- so the reason must come before any TIMING lines. The
+    # pipeline picks TIMING lines out of stderr wherever they appear.
+    timings: list[str] = []
 
+    def timing(operation: str, seconds: float) -> None:
+        timings.append(f"TIMING: {operation}={seconds:.3f}s")
+
+    failure = None
     transport = HttpTransport() if args.transport == "http" else StdioTransport()
     try:
         with MCPClient(transport, timeout=CALL_TIMEOUT) as client:
@@ -552,12 +568,16 @@ def main(argv: list[str] | None = None, *, text_stats: TextStats) -> int:
             )
             result = importer.run(args.file_path, args.relative_path)
     except ImporterError as e:
-        print(str(e), file=sys.stderr)
-        return 1
+        failure = str(e)
     except MCPError as e:
-        print(f"DEVONthink MCP error: {e} ({errors.MCP_FAILED})", file=sys.stderr)
-        return 1
+        failure = f"DEVONthink MCP error: {e} ({errors.MCP_FAILED})"
 
-    print(result.status)
-    print(f"sourcehash={result.sourcehash}")
+    if failure is not None:
+        print(failure, file=sys.stderr)
+    for line in timings:
+        print(line, file=sys.stderr)
+    if failure is not None:
+        return 1
+    for line in result_lines(result):
+        print(line)
     return 0
