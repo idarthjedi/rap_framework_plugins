@@ -128,10 +128,17 @@ rap_importer_plugin/
 │   ├── notifications.py       # macOS notifications
 │   ├── paths.py               # Path expansion utilities
 │   ├── pipeline.py            # Pipeline management
-│   └── watcher.py             # File watching
+│   ├── watcher.py             # File watching
+│   └── devonthink/            # MCP-based DEVONthink importer
+│       ├── mcp_client.py      # stdlib JSON-RPC client (stdio / HTTP)
+│       ├── importer.py        # import, stamp, OCR, reconcile, verify
+│       ├── enrichment.py      # DOI / ISBN bibliographic metadata
+│       └── errors.py          # error codes (1000-1011)
 ├── scripts/
-│   ├── devonthink_importer.applescript  # Source
-│   └── devonthink_importer.scpt         # Compiled
+│   ├── devonthink_importer.py           # MCP importer entry point
+│   ├── devonthink_importer.applescript  # AppleScript importer source (fallback)
+│   ├── devonthink_importer.scpt         # Compiled (fallback)
+│   └── pdf_text_stats.py                # OCR decision helper, shared by both
 ├── docs/                       # Historical plan documents (atomic, read-only)
 └── tests/                      # Test suite
 ```
@@ -329,6 +336,50 @@ The schema tests validate:
 - `config/config.json` validates against the schema
 - Invalid configs are correctly rejected
 
+## DEVONthink MCP Importer
+
+Two interchangeable pipeline entries import PDFs into DEVONthink. `config.json` holds both;
+**enable exactly one** — enabling both processes every file twice, and the second pass leaves a
+stray replica. Rollback is flipping the two `enabled` flags and restarting the daemon.
+
+| Entry | Type | Implementation |
+|-------|------|----------------|
+| `DEVONthink Import` | `applescript` | `scripts/devonthink_importer.scpt` (fallback) |
+| `DEVONthink Import (MCP)` | `python` | `scripts/devonthink_importer.py` → `rap_importer_plugin.devonthink` |
+
+Design record: `docs/008_devonthink_mcp_migration.md`.
+
+**The MCP server** ships inside DEVONthink.app
+(`Contents/Library/LoginItems/DEVONthink MCP.app`). The importer spawns it with `--stdio` per
+run (~30 ms, no credentials). `--transport http` uses the HTTP mode on `localhost:8420` instead,
+which needs the bearer token from DEVONthink's AI ▸ MCP settings (read automatically, or from
+`DEVONTHINK_MCP_TOKEN`).
+
+**Things that are not obvious:**
+- `ocr_record` creates a **new** record and leaves the original. The importer trashes the
+  pre-OCR original — but only a record whose file is still byte-identical to the source
+  (`sha256(file) == sourcehash`). Annotated or OCR'd records can never qualify.
+- `sourcehash` is stamped right after import, **before** OCR, with `mode="merge"`. The tool's
+  default mode replaces all custom metadata.
+- `sourcehash` must be SHA-256 of the **source file** on disk. RAP computes the same value
+  independently for Obsidian frontmatter; `tests/test_devonthink_importer.py::TestHashContract`
+  guards the correspondence.
+- `wordCount` and `kind` do not reveal whether OCR ran (un-OCR'd scans report a few words).
+- Trashed records are excluded from `search_records`.
+- The AppleScript's `perform smart rule ... trigger OCR event` was a no-op: no smart rule
+  carries the On OCR trigger. The MCP importer calls `resolve_doi_metadata` /
+  `resolve_book_metadata` directly instead (`--no-enrich` to disable, `--enrich-rename` to let
+  it rename records).
+
+**Extra args** (after `{file_path} {relative_path} [ocr_timeout]`): `--transport stdio|http`,
+`--no-enrich`, `--enrich-rename`. Set `UNPAYWALL_CONTACT_EMAIL` in `.env` to opt in to
+open-access PDF lookup (sends the address to Unpaywall).
+
+**Manual run** (never drop test files in the live watch folder):
+```bash
+uv run python scripts/devonthink_importer.py /path/to/file.pdf "Liberty.University/_MCPTest/file.pdf"
+```
+
 ## DEVONthink AppleScript Reference
 
 View the scripting dictionary:
@@ -380,6 +431,7 @@ Called via: `osascript devonthink_importer.scpt "/full/path" "Database/Group/fil
 | rumps | macOS menu bar apps |
 | python-dotenv | Environment variable loading from `.env` |
 | DEVONthink Pro | Document management (bundle ID: `DNtp`) |
+| DEVONthink MCP server | Bundled with DEVONthink 4.4+; used by the MCP importer (no Python dependency) |
 
 ## Documentation Conventions
 
