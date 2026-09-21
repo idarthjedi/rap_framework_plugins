@@ -133,9 +133,12 @@ rap_importer_plugin/
 │       ├── mcp_client.py      # stdlib JSON-RPC client (stdio / HTTP)
 │       ├── importer.py        # import, stamp, OCR, reconcile, verify
 │       ├── enrichment.py      # DOI / ISBN bibliographic metadata
-│       └── errors.py          # error codes (1000-1011)
+│       ├── pdf_info.py        # CoreGraphics page count + encryption
+│       ├── audit.py           # read-only import audit
+│       └── errors.py          # error codes (1000-1013)
 ├── scripts/
 │   ├── devonthink_importer.py           # MCP importer entry point
+│   ├── audit_imports.py                 # read-only audit entry point
 │   ├── devonthink_importer.applescript  # AppleScript importer source (fallback)
 │   ├── devonthink_importer.scpt         # Compiled (fallback)
 │   └── pdf_text_stats.py                # OCR decision helper, shared by both
@@ -355,21 +358,50 @@ run (~30 ms, no credentials). `--transport http` uses the HTTP mode on `localhos
 which needs the bearer token from DEVONthink's AI ▸ MCP settings (read automatically, or from
 `DEVONTHINK_MCP_TOKEN`).
 
+**Two rules that keep existing documents safe** (see `docs/009_mcp_importer_reconciliation_fix.md`):
+- **Never touch DEVONthink's filesystem.** No reading, hashing or listing files inside a
+  `.dtBase2` package, from code or from a session — all DEVONthink access goes through MCP (or
+  AppleScript). The importer never calls `get_imported_record_path`.
+- **Never modify a record this run did not create.** A hash match is only ever *replicated* into
+  the destination, and only after an identity check on its MCP properties: exact `sourcehash`,
+  `type == pdf`, equal page count. An unverifiable match fails the run (1012). `trash_record` is
+  only reachable through `_trash_created()`, which refuses any uuid not imported by the same run.
+
+**Pass or fail.** The menu bar shows nothing on success and an "Import Failed: <file>: <stderr>"
+notification on failure, with the file left in the import folder. stdout goes only to the log.
+So there are no warnings: anything that could lose content or file against the wrong record
+must fail. A banner shows only stderr's first line, so the importer writes the reason before its
+`TIMING:` lines.
+
 **Things that are not obvious:**
-- `ocr_record` creates a **new** record and leaves the original. The importer trashes the
-  pre-OCR original — but only a record whose file is still byte-identical to the source
-  (`sha256(file) == sourcehash`). Annotated or OCR'd records can never qualify.
+- `ocr_record` creates a **new** record and leaves the original. The importer trashes that
+  original — which it created seconds earlier — only once the copy is a different record
+  carrying the stamp.
+- Byte-identity proves nothing about a record being untouched: renames, tags, custom metadata
+  and replicas never change a PDF's bytes. (Believing otherwise caused the 2026-09-21 incident.)
 - `sourcehash` is stamped right after import, **before** OCR, with `mode="merge"`. The tool's
   default mode replaces all custom metadata.
 - `sourcehash` must be SHA-256 of the **source file** on disk. RAP computes the same value
   independently for Obsidian frontmatter; `tests/test_devonthink_importer.py::TestHashContract`
   guards the correspondence.
+- Encrypted PDFs (HBR's carry an owner password) read as 0 chars/page to `pdf_text_stats`, so
+  they look like scans. `devonthink/pdf_info.py` asks CoreGraphics instead; encrypted PDFs skip
+  OCR, which always fails on them.
+- DEVONthink renames records from the PDF's embedded title (`H099N1-PDF-ENG` → *"The Science of
+  Developing Creative Talent"*). The log's `name=` / `location=` lines say where each file went.
 - `wordCount` and `kind` do not reveal whether OCR ran (un-OCR'd scans report a few words).
-- Trashed records are excluded from `search_records`.
+- Trashed records are excluded from `search_records`, even when scoped to the trash group.
 - The AppleScript's `perform smart rule ... trigger OCR event` was a no-op: no smart rule
   carries the On OCR trigger. The MCP importer calls `resolve_doi_metadata` /
   `resolve_book_metadata` directly instead (`--no-enrich` to disable, `--enrich-rename` to let
   it rename records).
+
+**Audit** (read-only; only four `get`/`search` tools are allowed through):
+```bash
+uv run python scripts/audit_imports.py --since 2026-09-21   # files archived since a date
+uv run python scripts/audit_imports.py --problems-only       # the whole archive
+```
+Reports each file as found / duplicate / ambiguous / trashed / missing / skipped.
 
 **Extra args** (after `{file_path} {relative_path} [ocr_timeout]`): `--transport stdio|http`,
 `--no-enrich`, `--enrich-rename`. Set `UNPAYWALL_CONTACT_EMAIL` in `.env` to opt in to
